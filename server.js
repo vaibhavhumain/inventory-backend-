@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const connectDB = require('./config/db');
 const itemRoutes = require('./routes/itemRoutes');
-
+const authRoutes = require('./routes/authRoutes');
 connectDB();
 
 const app = express();
@@ -12,6 +12,7 @@ app.use(cors({origin: process.env.CLIENT_URL || '*'}));
 app.use(express.json());
 
 app.use('/api/items',itemRoutes);
+app.use('/api/auth', authRoutes);
 
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
