@@ -7,9 +7,9 @@ const generateToken = (id) => {
   });
 }
 
-exports.register = async (req, res) => {
+exports.registerUser = async (req, res) => {
     try{
-        const { name, username, email, password } = req.body;
+        const { name, username, email, password, role } = req.body;
         const userExists = await User.findOne({email});
         if(userExists) {
             return res.status(400).json({ error: 'User already exists' });
