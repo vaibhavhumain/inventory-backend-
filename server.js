@@ -4,6 +4,7 @@ const cors = require("cors");
 const connectDB = require('./config/db');
 const itemRoutes = require('./routes/itemRoutes');
 const authRoutes = require('./routes/authRoutes');
+const purchaseBillRoutes = require('./routes/purchaseBillRoutes');
 connectDB();
 
 const app = express();
@@ -13,11 +14,12 @@ app.use(express.json());
 
 app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/purchase-bills', purchaseBillRoutes);
 
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
+    res.end();
 });
-
 
 app.use((req,res,_next) => {
     res.status(404).json({error:`Route ${req.originalUrl} not found`});
