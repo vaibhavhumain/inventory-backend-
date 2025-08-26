@@ -6,6 +6,7 @@ const itemRoutes = require('./routes/itemRoutes');
 const authRoutes = require('./routes/authRoutes');
 const purchaseBillRoutes = require('./routes/purchaseBillRoutes');
 const stockRoutes = require('./routes/stockLedgerRoutes');
+const exportRoutes = require("./routes/exportRoutes");
 connectDB();
 
 const app = express();
@@ -24,7 +25,7 @@ app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/purchase-bills', purchaseBillRoutes);
 app.use('/api/stock', stockRoutes);
-
+app.use('/api/export', exportRoutes);
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();
