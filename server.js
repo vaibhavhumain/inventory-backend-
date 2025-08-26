@@ -5,16 +5,25 @@ const connectDB = require('./config/db');
 const itemRoutes = require('./routes/itemRoutes');
 const authRoutes = require('./routes/authRoutes');
 const purchaseBillRoutes = require('./routes/purchaseBillRoutes');
+const stockRoutes = require('./routes/stockLedgerRoutes');
 connectDB();
 
 const app = express();
 
-app.use(cors({origin: process.env.CLIENT_URL || '*'}));
+app.use(cors({
+  origin: [
+    "https://invetrack.netlify.app",  
+    "http://localhost:3000"
+  ],
+  credentials: true
+}));
+    
 app.use(express.json());
 
 app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/purchase-bills', purchaseBillRoutes);
+app.use('/api/stock', stockRoutes);
 
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
