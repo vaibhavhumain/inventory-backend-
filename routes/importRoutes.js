@@ -36,45 +36,49 @@ let autoCounter = 1;
 
 router.post("/items", upload.single("file"), async (req, res) => {
   try {
+    console.log("File uploaded:", req.file);
+
     const workbook = xlsx.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
-    const items = data
-      .map((row) => {
-        const code = row["Code"]?.toString().trim();
-        const category = normalizeCategory(row["CATEGORY"]);
+    console.log("Parsed rows:", data.length);
 
-        // Skip junk header rows
-        if (!code && !row["ITEM DESCRIPTION"]) {
-          return null;
-        }
+    const items = data.map((row, idx) => {
+      return {
+        code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
+        closingQty: Number(row["Closing Quantity"]) || 0,
+        category: normalizeCategory(row["CATEGORY"]) || "raw material",
+        description: (row["ITEM DESCRIPTION"] || "").trim(),
+        plantName: (row["PLANT NAME"] || "").trim(),
+        weight: row["WEIGHT per sheet / pipe"]
+          ? Number(row["WEIGHT per sheet / pipe"])
+          : undefined,
+        unit: (row["UOM"] || "").trim(),
+        stockTaken: (row["stock taken qty"] || "").trim(),
+        location: (row["Location"] || "").trim(),
+      };
+    });
 
-        return {
-          code: code || `AUTO${autoCounter++}`,   // fallback auto-code
-          closingQty: Number(row["Closing Quantity"]) || 0,
-          category: category || "raw material",  // fallback category
-          description: (row["ITEM DESCRIPTION"] || "").trim(),
-          plantName: (row["PLANT NAME"] || "").trim(),
-          weight: row["WEIGHT per sheet / pipe"]
-            ? Number(row["WEIGHT per sheet / pipe"])
-            : undefined,
-          unit: (row["UOM"] || "").trim(),
-          stockTaken: (row["stock taken qty"] || "").trim(),
-          location: (row["Location"] || "").trim(),
-        };
-      })
-      .filter(Boolean); // remove skipped rows
+    console.log("Prepared items:", items.length);
 
-    await Item.insertMany(items);
+    // Insert in smaller batches (avoid crashing)
+    const batchSize = 200;
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      await Item.insertMany(batch, { ordered: false });
+      console.log(`Inserted batch ${i / batchSize + 1}`);
+    }
 
     res.status(200).json({
       message: "✅ Items imported successfully",
       count: items.length,
     });
   } catch (error) {
+    console.error("Import error:", error);
     res.status(500).json({ error: error.message });
   }
 });
+
 
 module.exports = router;
