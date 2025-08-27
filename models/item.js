@@ -12,7 +12,7 @@ const itemSchema = new mongoose.Schema({
         "adhesive", "bought out", "chemicals", "consumables",
         "electricals", "electronics", "hardware", "paints",
         "plastics", "raw material", "rubbers"
-    ]},
+     ]},
     description: { type: String, required: true },          
     plantName: { type: String },                            
     weight: { type: Number },                               
