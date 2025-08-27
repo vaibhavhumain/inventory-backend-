@@ -82,8 +82,10 @@ exports.updateItem = async (req, res) => {
 exports.deleteItem = async (req, res) => {
   try {
     const deletedItem = await Item.findByIdAndDelete(req.params.id);
-    if (!deletedItem) return res.status(404).json({ error: 'Item not found' });
-    res.status(200).json({ message: 'Item deleted successfully' });
+    if (!deletedItem) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+    res.status(200).json({ message: "Item deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
