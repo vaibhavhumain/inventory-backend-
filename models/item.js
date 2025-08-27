@@ -7,13 +7,9 @@ const dailyStockSchema = new mongoose.Schema({
 }, { _id: false });
 
 const itemSchema = new mongoose.Schema({
-    code: { type: String, required: true, unique: true },   
-    category: { type: String, required: true, enum: [
-        "adhesive", "bought out", "chemicals", "consumables",
-        "electricals", "electronics", "hardware", "paints",
-        "plastics", "raw material", "rubbers"
-     ]},
-    description: { type: String, required: true },          
+    code: { type: String, unique: true },   
+    category: { type: String},
+    description: { type: String},          
     plantName: { type: String },                            
     weight: { type: Number },                               
     unit: { type: String },                                 
