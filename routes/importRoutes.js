@@ -6,7 +6,6 @@ const Item = require("../models/item");
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 
-// Normalize categories
 function normalizeCategory(cat) {
   if (!cat) return null;
   cat = cat.toLowerCase().trim();
@@ -23,7 +22,7 @@ function normalizeCategory(cat) {
     "paints": "paints",
     "rubbers": "rubbers",
     "chemicals": "chemicals",
-    "adhessive": "adhesive", // fix typo
+    "adhessive": "adhesive", 
     "adhesive": "adhesive",
     "plastics": "plastics"
   };
@@ -31,7 +30,6 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
-// Auto code counter for missing codes
 let autoCounter = 1;
 
 router.post("/items", upload.single("file"), async (req, res) => {
@@ -62,7 +60,6 @@ router.post("/items", upload.single("file"), async (req, res) => {
 
     console.log("Prepared items:", items.length);
 
-    // Insert in smaller batches (avoid crashing)
     const batchSize = 200;
     for (let i = 0; i < items.length; i += batchSize) {
       const batch = items.slice(i, i + batchSize);
