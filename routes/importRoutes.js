@@ -13,15 +13,15 @@ router.post("/items", upload.single("file"), async (req, res) => {
     const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
     const items = data.map((row) => ({
-      code: row["Code"],
-      closingQty: Number(row["ClosingQty"]) || 0,
-      category: row["Category"].toLowerCase(),
-      description: row["Description"],
-      plantName: row["PlantName"],
-      weight: row["Weight"] ? Number(row["Weight"]) : undefined,
-      unit: row["Unit"],
-      stockTaken: row["StockTaken"],
-    }));
+  code: row["Code"],
+  closingQty: Number(row["Closing Quantity"]) || 0,
+  category: row["CATEGORY"] ? row["CATEGORY"].toLowerCase() : "",
+  description: row["ITEM DESCRIPTION"],
+  plantName: row["PLANT NAME"],
+  weight: row["WEIGHT per sheet / pipe"] ? Number(row["WEIGHT per sheet / pipe"]) : undefined,
+  unit: row["UOM"],
+  stockTaken: row["stock taken qty"],
+}));
 
     await Item.insertMany(items);
 
