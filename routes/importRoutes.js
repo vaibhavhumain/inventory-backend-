@@ -43,20 +43,20 @@ router.post("/items", upload.single("file"), async (req, res) => {
     console.log("Parsed rows:", data.length);
 
     const items = data.map((row, idx) => {
-      return {
-        code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
-        closingQty: Number(row["Closing Quantity"]) || 0,
-        category: normalizeCategory(row["CATEGORY"]) || "raw material",
-        description: (row["ITEM DESCRIPTION"] || "").trim(),
-        plantName: (row["PLANT NAME"] || "").trim(),
-        weight: row["WEIGHT per sheet / pipe"]
-          ? Number(row["WEIGHT per sheet / pipe"])
-          : undefined,
-        unit: (row["UOM"] || "").trim(),
-        stockTaken: (row["stock taken qty"] || "").trim(),
-        location: (row["Location"] || "").trim(),
-      };
-    });
+  return {
+    code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
+    closingQty: Number(row["Closing Quantity"]) || 0,
+    category: normalizeCategory(row["CATEGORY"]) || "",
+    description: (row["ITEM DESCRIPTION"] || "").trim(),
+    plantName: (row["PLANT NAME"] || "").trim(),
+    weight: row["WEIGHT per sheet / pipe"]
+      ? Number(row["WEIGHT per sheet / pipe"])
+      : undefined,
+    unit: (row["UOM"] || "").trim(),
+    stockTaken: (row["stock taken qty"] || "").trim(),
+    location: (row["Location"] || "").trim(),
+  };
+});
 
     console.log("Prepared items:", items.length);
 
