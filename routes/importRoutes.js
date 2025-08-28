@@ -9,6 +9,7 @@ const upload = multer({ dest: "uploads/" });
 function normalizeCategory(cat) {
   if (!cat) return null;
   cat = cat.toLowerCase().trim();
+
   const mapping = {
     "raw material": "raw material",
     "raw materials": "raw material",
@@ -21,39 +22,43 @@ function normalizeCategory(cat) {
     "paints": "paints",
     "rubbers": "rubbers",
     "chemicals": "chemicals",
-    "adhessive": "adhesive",
+    "adhessive": "adhesive", 
     "adhesive": "adhesive",
     "plastics": "plastics"
   };
+
   return mapping[cat] || cat;
 }
 
+let autoCounter = 1;
+
 router.post("/items", upload.single("file"), async (req, res) => {
   try {
+    console.log("File uploaded:", req.file);
+
     const workbook = xlsx.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
-    const rawData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
-    console.log("Parsed rows:", rawData.length);
+    console.log("Parsed rows:", data.length);
 
-    const items = rawData.map((row, idx) => {
-      return {
-        code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
-        closingQty: Number(row["Closing Quantity"] || row["QTY."]) || 0,
-        category: normalizeCategory(row["CATEGORY"] || row["Category"]) || "",
-        description: (row["ITEM DESCRIPTION"] || row["Description"] || "").trim(),
-        plantName: (row["PLANT NAME"] || row["Plant"] || "").trim(),
-        weight: row["WEIGHT per sheet / pipe"]
-          ? Number(row["WEIGHT per sheet / pipe"])
-          : undefined,
-        unit: (row["UOM"] || "").trim(),
-        stockTaken: (row["stock taken qty"] || "").trim(),
-        location: (row["Location"] || "").trim(),
-        storeLocation: (row["Store Location"] || row["Store Loc"] || "").toString().trim() || null,
-        remarks: (row["Remarks"] || row["Remark"] || "").toString().trim() || null,
-        noOfPcs: row["no.of pcs of rm"] ? Number(row["no.of pcs of rm"]) : undefined, // ✅ new field if you want to store it
-      };
-    });
+    const items = data.map((row, idx) => {
+  return {
+    code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
+    closingQty: Number(row["Closing Quantity"]) || 0,
+    category: normalizeCategory(row["CATEGORY"]) || "",
+    description: (row["ITEM DESCRIPTION"] || "").trim(),
+    plantName: (row["PLANT NAME"] || "").trim(),
+    weight: row["WEIGHT per sheet / pipe"]
+      ? Number(row["WEIGHT per sheet / pipe"])
+      : undefined,
+    unit: (row["UOM"] || "").trim(),
+    stockTaken: (row["stock taken qty"] || "").trim(),
+    location: (row["Location"] || "").trim(),
+    storeLocation: (row["Store Location"] || "").toLowerCase().trim() || null,
+    remarks: (row["Remarks"] || "").toLowerCase().trim() || null,
+  };
+});
 
     console.log("Prepared items:", items.length);
 
@@ -73,5 +78,6 @@ router.post("/items", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 module.exports = router;
