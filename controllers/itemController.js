@@ -90,3 +90,45 @@ exports.deleteItem = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+exports.bulkUpdateItems = async (req, res) => {
+  try {
+    const { date, changes } = req.body;
+
+    if (!date || !Array.isArray(changes)) {
+      return res.status(400).json({ error: "Date and changes array are required" });
+    }
+
+    const updatedItems = [];
+
+    for (const change of changes) {
+      const { itemId, newQty } = change;
+      const item = await Item.findById(itemId);
+      if (!item) continue;
+
+      const oldQty = item.closingQty || 0;
+      const difference = newQty - oldQty;
+
+      item.closingQty = newQty;
+      if (difference !== 0) {
+        item.dailyStock.push({
+          date: new Date(date),
+          in: difference > 0 ? difference : 0,
+          out: difference < 0 ? Math.abs(difference) : 0,
+        });
+      }
+
+      await item.save();
+      updatedItems.push(item);
+    }
+
+    res.status(200).json({
+      message: "✅ Items updated successfully",
+      count: updatedItems.length,
+      items: updatedItems,
+    });
+  } catch (error) {
+    console.error("Bulk update error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
