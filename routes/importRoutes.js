@@ -55,6 +55,8 @@ router.post("/items", upload.single("file"), async (req, res) => {
     unit: (row["UOM"] || "").trim(),
     stockTaken: (row["stock taken qty"] || "").trim(),
     location: (row["Location"] || "").trim(),
+    storeLocation: (row["Store Location"] || "").toLowerCase().trim() || null,
+    remarks: (row["Remarks"] || "").toLowerCase().trim() || null,
   };
 });
 

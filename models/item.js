@@ -17,6 +17,16 @@ const itemSchema = new mongoose.Schema({
     stockTaken: { type: String },                           
     dailyStock: [dailyStockSchema],                         
     location: { type: String },
+    storeLocation: { 
+        type: String, 
+        enum: ["main store", "sub store"], 
+        default: null 
+    },
+    remarks: { 
+        type: String, 
+        enum: ["fast moving", "slow moving", "dead stock"], 
+        default: null 
+    },
     createdAt: { type: Date, default: Date.now }
 });
 
