@@ -30,8 +30,6 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
-let autoCounter = 1;
-
 router.post("/items", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
@@ -42,49 +40,78 @@ router.post("/items", upload.single("file"), async (req, res) => {
 
     console.log("Parsed rows:", data.length);
 
-    const items = data.map((row, idx) => {
-  return {
-    code: row["Code"]?.toString().trim() || `AUTO${idx + 1}`,
-    closingQty: Number(row["Closing Quantity"]) || 0,
-    category: normalizeCategory(row["CATEGORY"]) || "",
-    description: (row["ITEM DESCRIPTION"] || "").trim(),
-    plantName: (row["PLANT NAME"] || "").trim(),
-    weight: row["WEIGHT per sheet / pipe"]
-      ? Number(row["WEIGHT per sheet / pipe"])
-      : undefined,
-    unit: (row["UOM"] || "").trim(),
-    stockTaken: (row["stock taken qty"] || "").trim(),
-    location: (row["Location"] || "").trim(),
+    const today = new Date();
 
-    storeLocation: (
-      row["Store Location"] ||
-      row["STORE LOCATION"] ||
-      row["store location"] ||
-      ""
-    ).toString().trim(),
+    for (let idx = 0; idx < data.length; idx++) {
+      const row = data[idx];
+      const qty = Number(row["Closing Quantity"]) || 0;
+      const code = row["Code"]?.toString().trim() || `AUTO${idx + 1}`;
 
-    remarks: (
-      row["Remarks"] ||
-      row["REMARKS"] ||
-      row["remark"] ||
-      row["REMARK"] ||
-      ""
-    ).toString().trim(),
-  };
-});
+      const newData = {
+        code,
+        closingQty: qty,
+        category: normalizeCategory(row["CATEGORY"]) || "",
+        description: (row["ITEM DESCRIPTION"] || "").trim(),
+        plantName: (row["PLANT NAME"] || "").trim(),
+        weight: row["WEIGHT per sheet / pipe"]
+          ? Number(row["WEIGHT per sheet / pipe"])
+          : undefined,
+        unit: (row["UOM"] || "").trim(),
+        stockTaken: (row["stock taken qty"] || "").trim(),
+        location: (row["Location"] || "").trim(),
+        storeLocation: (
+          row["Store Location"] ||
+          row["STORE LOCATION"] ||
+          row["store location"] ||
+          ""
+        ).toString().trim(),
+        remarks: (
+          row["Remarks"] ||
+          row["REMARKS"] ||
+          row["remark"] ||
+          row["REMARK"] ||
+          ""
+        ).toString().trim(),
+      };
 
-    console.log("Prepared items:", items.length);
+      // 🔍 Check if item already exists
+      const existing = await Item.findOne({ code });
 
-    const batchSize = 200;
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
-      await Item.insertMany(batch, { ordered: false });
-      console.log(`Inserted batch ${i / batchSize + 1}`);
+      if (existing) {
+        let inQty = 0, outQty = 0;
+
+        if (qty > existing.closingQty) inQty = qty - existing.closingQty;
+        if (qty < existing.closingQty) outQty = existing.closingQty - qty;
+
+        await Item.updateOne(
+          { code: existing.code },
+          {
+            $set: {
+              closingQty: qty,
+              category: newData.category,
+              description: newData.description,
+              plantName: newData.plantName,
+              weight: newData.weight,
+              unit: newData.unit,
+              stockTaken: newData.stockTaken,
+              location: newData.location,
+              storeLocation: newData.storeLocation,
+              remarks: newData.remarks
+            },
+            $push: { dailyStock: { date: today, in: inQty, out: outQty } }
+          }
+        );
+      } else {
+        await Item.create({
+          ...newData,
+          dailyStock: [{ date: today, in: qty, out: 0 }]
+        });
+      }
     }
 
     res.status(200).json({
-      message: "✅ Items imported successfully",
-      count: items.length,
+      message: "✅ Items imported/updated successfully with history",
+      count: data.length,
     });
   } catch (error) {
     console.error("Import error:", error);
@@ -92,5 +119,26 @@ router.post("/items", upload.single("file"), async (req, res) => {
   }
 });
 
+router.get("/items/:code/history", async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const item = await Item.findOne({ code });
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    res.status(200).json({
+      code: item.code,
+      description: item.description,
+      closingQty: item.closingQty,
+      history: item.dailyStock
+    });
+  } catch (error) {
+    console.error("History fetch error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;
