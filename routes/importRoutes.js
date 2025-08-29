@@ -140,4 +140,45 @@ router.get("/:code/history", async (req, res) => {
   }
 });
 
+router.put("/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const updateData = req.body; 
+
+    const item = await Item.findOne({ code });
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const today = new Date();
+
+    if (updateData.closingQty !== undefined) {
+      const newQty = Number(updateData.closingQty);
+      let inQty = 0, outQty = 0;
+
+      if (newQty > item.closingQty) inQty = newQty - item.closingQty;
+      if (newQty < item.closingQty) outQty = item.closingQty - newQty;
+
+      item.closingQty = newQty;
+      item.dailyStock.push({ date: today, in: inQty, out: outQty });
+    }
+
+    item.category = updateData.category ?? item.category;
+    item.description = updateData.description ?? item.description;
+    item.plantName = updateData.plantName ?? item.plantName;
+    item.weight = updateData.weight ?? item.weight;
+    item.unit = updateData.unit ?? item.unit;
+    item.location = updateData.location ?? item.location;
+    item.storeLocation = updateData.storeLocation ?? item.storeLocation;
+    item.remarks = updateData.remarks ?? item.remarks;
+
+    await item.save();
+
+    res.status(200).json({ message: "✅ Item updated", item });
+  } catch (error) {
+    console.error("Update error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
