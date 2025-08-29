@@ -30,7 +30,6 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
-// 📌 Import Excel and create/update items
 router.post("/", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
@@ -48,6 +47,10 @@ router.post("/", upload.single("file"), async (req, res) => {
       const qty = Number(row["Closing Quantity"]) || 0;
       const code = row["Code"]?.toString().trim() || `AUTO${idx + 1}`;
 
+      // 🆕 read from Excel → Main Store & Sub Store columns
+      const mainStoreQty = Number(row["Main Store"]) || 0;
+      const subStoreQty = Number(row["Sub Store"]) || 0;
+
       const newData = {
         code,
         closingQty: qty,
@@ -60,12 +63,6 @@ router.post("/", upload.single("file"), async (req, res) => {
         unit: (row["UOM"] || "").trim(),
         stockTaken: (row["stock taken qty"] || "").trim(),
         location: (row["Location"] || "").trim(),
-        storeLocation: (
-          row["Store Location"] ||
-          row["STORE LOCATION"] ||
-          row["store location"] ||
-          ""
-        ).toString().trim(),
         remarks: (
           row["Remarks"] ||
           row["REMARKS"] ||
@@ -73,6 +70,10 @@ router.post("/", upload.single("file"), async (req, res) => {
           row["REMARK"] ||
           ""
         ).toString().trim(),
+
+        // 🔥 new fields
+        mainStoreQty,
+        subStoreQty
       };
 
       const existing = await Item.findOne({ code });
@@ -95,16 +96,19 @@ router.post("/", upload.single("file"), async (req, res) => {
               unit: newData.unit,
               stockTaken: newData.stockTaken,
               location: newData.location,
-              storeLocation: newData.storeLocation,
               remarks: newData.remarks,
+
+              // 🔥 update main/sub store
+              mainStoreQty: newData.mainStoreQty,
+              subStoreQty: newData.subStoreQty
             },
-            $push: { dailyStock: { date: today, in: inQty, out: outQty } }
+            $push: { dailyStock: { date: today, in: inQty, out: outQty, closingQty: qty } }
           }
         );
       } else {
         await Item.create({
           ...newData,
-          dailyStock: [{ date: today, in: qty, out: 0 }]
+          dailyStock: [{ date: today, in: qty, out: 0, closingQty: qty }]
         });
       }
     }
@@ -118,6 +122,7 @@ router.post("/", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // 📌 Get history by code
 router.get("/:code/history", async (req, res) => {
