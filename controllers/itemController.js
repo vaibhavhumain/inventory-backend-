@@ -71,44 +71,64 @@ exports.getItemByCode = async (req, res) => {
 };
 
 // ✅ Update item by CODE
+// ✅ Update item by CODE (with main/sub store handling)
 exports.updateItemByCode = async (req, res) => {
   try {
-    const updateData = { ...req.body };
-    delete updateData._id;
-    delete updateData.__v;
+    const { code } = req.params;
+    const { description, category, plantName, weight, unit, remarks, addQty, targetStore } = req.body;
 
-    const item = await Item.findOne({ code: req.params.code });
-    if (!item) return res.status(404).json({ error: 'Item not found' });
+    let { mainStoreQty, subStoreQty } = req.body;
+
+    const item = await Item.findOne({ code });
+    if (!item) return res.status(404).json({ error: "Item not found" });
 
     const today = new Date();
 
-    if (updateData.closingQty !== undefined) {
-      const newQty = Number(updateData.closingQty);
-      let inQty = 0, outQty = 0;
+    // If addQty + targetStore provided → increment logic
+    if (addQty && targetStore) {
+      if (targetStore === "Main Store") {
+        mainStoreQty = (item.mainStoreQty || 0) + Number(addQty);
+        subStoreQty = item.subStoreQty || 0;
+      } else if (targetStore === "Sub Store") {
+        subStoreQty = (item.subStoreQty || 0) + Number(addQty);
+        mainStoreQty = item.mainStoreQty || 0;
+      }
+    } else {
+      // Otherwise, fall back to provided absolute values
+      mainStoreQty = mainStoreQty ?? item.mainStoreQty;
+      subStoreQty = subStoreQty ?? item.subStoreQty;
+    }
 
-      if (newQty > item.closingQty) inQty = newQty - item.closingQty;
-      if (newQty < item.closingQty) outQty = item.closingQty - newQty;
+    // Always recalc closing qty
+    const newClosing = Number(mainStoreQty) + Number(subStoreQty);
+    const oldClosing = item.closingQty || 0;
 
-      item.closingQty = newQty;
+    let inQty = 0, outQty = 0;
+    if (newClosing > oldClosing) inQty = newClosing - oldClosing;
+    if (newClosing < oldClosing) outQty = oldClosing - newClosing;
+
+    // Apply updates
+    item.description = description ?? item.description;
+    item.category = category ?? item.category;
+    item.plantName = plantName ?? item.plantName;
+    item.weight = weight ?? item.weight;
+    item.unit = unit ?? item.unit;
+    item.remarks = remarks ?? item.remarks;
+
+    item.mainStoreQty = mainStoreQty;
+    item.subStoreQty = subStoreQty;
+    item.closingQty = newClosing;
+
+    if (inQty !== 0 || outQty !== 0) {
       item.dailyStock.push({
         date: today,
         in: inQty,
         out: outQty,
-        closingQty: newQty,   
+        closingQty: newClosing
       });
     }
 
-    item.category = updateData.category ?? item.category;
-    item.description = updateData.description ?? item.description;
-    item.plantName = updateData.plantName ?? item.plantName;
-    item.weight = updateData.weight ?? item.weight;
-    item.unit = updateData.unit ?? item.unit;
-    item.location = updateData.location ?? item.location;
-    item.storeLocation = updateData.storeLocation ?? item.storeLocation;
-    item.remarks = updateData.remarks ?? item.remarks;
-
     await item.save();
-
     res.status(200).json(item);
   } catch (error) {
     res.status(400).json({ error: error.message });
