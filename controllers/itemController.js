@@ -153,6 +153,7 @@ exports.bulkUpdateItems = async (req, res) => {
           date: new Date(date),
           in: difference > 0 ? difference : 0,
           out: difference < 0 ? Math.abs(difference) : 0,
+          closingQty: newQty,
         });
       }
 
