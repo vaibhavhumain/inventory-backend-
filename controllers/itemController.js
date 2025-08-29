@@ -15,6 +15,7 @@ const categoryPrefixes = {
   "furniture": "FR"
 };
 
+// ✅ Create Item
 exports.createItem = async (req, res) => {
   try {
     let { code, category, description, plantName, weight, unit, closingQty, stockTaken, location } = req.body;
@@ -48,6 +49,7 @@ exports.createItem = async (req, res) => {
   }
 };
 
+// ✅ Get all items
 exports.getItems = async (req, res) => {
   try {
     const items = await Item.find();
@@ -57,9 +59,10 @@ exports.getItems = async (req, res) => {
   }
 };
 
-exports.getItemById = async (req, res) => {
+// ✅ Get item by CODE (not _id)
+exports.getItemByCode = async (req, res) => {
   try {
-    const item = await Item.findById(req.params.id);
+    const item = await Item.findOne({ code: req.params.code });
     if (!item) return res.status(404).json({ error: 'Item not found' });
     res.status(200).json(item);
   } catch (error) {
@@ -67,11 +70,19 @@ exports.getItemById = async (req, res) => {
   }
 };
 
-exports.updateItem = async (req, res) => {
+// ✅ Update item by CODE
+exports.updateItemByCode = async (req, res) => {
   try {
-    const updatedItem = await Item.findByIdAndUpdate(
-      req.params.id, req.body, { new: true, runValidators: true }
+    const updateData = { ...req.body };
+    delete updateData._id;
+    delete updateData.__v;
+
+    const updatedItem = await Item.findOneAndUpdate(
+      { code: req.params.code },
+      updateData,
+      { new: true, runValidators: true }
     );
+
     if (!updatedItem) return res.status(404).json({ error: 'Item not found' });
     res.status(200).json(updatedItem);
   } catch (error) {
@@ -79,9 +90,10 @@ exports.updateItem = async (req, res) => {
   }
 };
 
-exports.deleteItem = async (req, res) => {
+// ✅ Delete item by CODE
+exports.deleteItemByCode = async (req, res) => {
   try {
-    const deletedItem = await Item.findByIdAndDelete(req.params.id);
+    const deletedItem = await Item.findOneAndDelete({ code: req.params.code });
     if (!deletedItem) {
       return res.status(404).json({ error: "Item not found" });
     }
@@ -91,6 +103,7 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
+// ✅ Bulk update by itemId (still uses _id internally)
 exports.bulkUpdateItems = async (req, res) => {
   try {
     const { date, changes } = req.body;
@@ -102,8 +115,8 @@ exports.bulkUpdateItems = async (req, res) => {
     const updatedItems = [];
 
     for (const change of changes) {
-      const { itemId, newQty } = change;
-      const item = await Item.findById(itemId);
+      const { code, newQty } = change; // 🔄 changed to code
+      const item = await Item.findOne({ code });
       if (!item) continue;
 
       const oldQty = item.closingQty || 0;
