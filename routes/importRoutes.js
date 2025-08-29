@@ -22,7 +22,7 @@ function normalizeCategory(cat) {
     "paints": "paints",
     "rubbers": "rubbers",
     "chemicals": "chemicals",
-    "adhessive": "adhesive", 
+    "adhessive": "adhesive",
     "adhesive": "adhesive",
     "plastics": "plastics"
   };
@@ -30,6 +30,7 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
+// 📌 Import Excel and create/update items
 router.post("/", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
@@ -95,7 +96,7 @@ router.post("/", upload.single("file"), async (req, res) => {
               stockTaken: newData.stockTaken,
               location: newData.location,
               storeLocation: newData.storeLocation,
-              remarks: newData.remarks
+              remarks: newData.remarks,
             },
             $push: { dailyStock: { date: today, in: inQty, out: outQty } }
           }
@@ -118,10 +119,10 @@ router.post("/", upload.single("file"), async (req, res) => {
   }
 });
 
+// 📌 Get history by code
 router.get("/:code/history", async (req, res) => {
   try {
     const { code } = req.params;
-
     const item = await Item.findOne({ code });
 
     if (!item) {
@@ -140,10 +141,15 @@ router.get("/:code/history", async (req, res) => {
   }
 });
 
+// 📌 Update item by code
 router.put("/:code", async (req, res) => {
   try {
     const { code } = req.params;
-    const updateData = req.body; 
+    const updateData = { ...req.body };
+
+    // 🚨 Ensure _id and __v don’t get passed to Mongoose
+    delete updateData._id;
+    delete updateData.__v;
 
     const item = await Item.findOne({ code });
     if (!item) {
@@ -163,6 +169,7 @@ router.put("/:code", async (req, res) => {
       item.dailyStock.push({ date: today, in: inQty, out: outQty });
     }
 
+    // ✅ merge only safe fields
     item.category = updateData.category ?? item.category;
     item.description = updateData.description ?? item.description;
     item.plantName = updateData.plantName ?? item.plantName;
