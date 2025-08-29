@@ -71,21 +71,20 @@ exports.getItemByCode = async (req, res) => {
 };
 
 // ✅ Update item by CODE
-// ✅ Update item by CODE (with main/sub store handling)
+// ✅ Update item by CODE
 exports.updateItemByCode = async (req, res) => {
   try {
     const { code } = req.params;
     const { description, category, plantName, weight, unit, remarks, addQty, targetStore } = req.body;
 
     let { mainStoreQty, subStoreQty } = req.body;
-
     const item = await Item.findOne({ code });
     if (!item) return res.status(404).json({ error: "Item not found" });
 
     const today = new Date();
 
-    // If addQty + targetStore provided → increment logic
-    if (addQty && targetStore) {
+    // ✅ Increment mode
+    if (addQty !== undefined && targetStore) {
       if (targetStore === "Main Store") {
         mainStoreQty = (item.mainStoreQty || 0) + Number(addQty);
         subStoreQty = item.subStoreQty || 0;
@@ -94,12 +93,12 @@ exports.updateItemByCode = async (req, res) => {
         mainStoreQty = item.mainStoreQty || 0;
       }
     } else {
-      // Otherwise, fall back to provided absolute values
+      // ✅ Absolute values mode
       mainStoreQty = mainStoreQty ?? item.mainStoreQty;
       subStoreQty = subStoreQty ?? item.subStoreQty;
     }
 
-    // Always recalc closing qty
+    // ✅ Always recalc closing qty
     const newClosing = Number(mainStoreQty) + Number(subStoreQty);
     const oldClosing = item.closingQty || 0;
 
@@ -107,7 +106,7 @@ exports.updateItemByCode = async (req, res) => {
     if (newClosing > oldClosing) inQty = newClosing - oldClosing;
     if (newClosing < oldClosing) outQty = oldClosing - newClosing;
 
-    // Apply updates
+    // ✅ Apply updates
     item.description = description ?? item.description;
     item.category = category ?? item.category;
     item.plantName = plantName ?? item.plantName;
@@ -119,12 +118,15 @@ exports.updateItemByCode = async (req, res) => {
     item.subStoreQty = subStoreQty;
     item.closingQty = newClosing;
 
+    // ✅ Add stock history (with store snapshot)
     if (inQty !== 0 || outQty !== 0) {
       item.dailyStock.push({
         date: today,
         in: inQty,
         out: outQty,
-        closingQty: newClosing
+        closingQty: newClosing,
+        mainStoreQty,
+        subStoreQty
       });
     }
 
@@ -134,7 +136,6 @@ exports.updateItemByCode = async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 };
-
 // ✅ Delete item by CODE
 exports.deleteItemByCode = async (req, res) => {
   try {
