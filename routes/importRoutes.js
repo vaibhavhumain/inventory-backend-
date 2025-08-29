@@ -119,7 +119,7 @@ router.post("/items", upload.single("file"), async (req, res) => {
   }
 });
 
-router.get("/items/:code/history", async (req, res) => {
+router.get("/:code/history", async (req, res) => {
   try {
     const { code } = req.params;
 

@@ -20,3 +20,4 @@ router.delete("/:id", protect, authorize("developer"), deleteItem);
 
 
 module.exports = router;
+  
