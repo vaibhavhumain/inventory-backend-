@@ -30,7 +30,7 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
-router.post("/items", upload.single("file"), async (req, res) => {
+router.post("/", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
 
@@ -74,7 +74,6 @@ router.post("/items", upload.single("file"), async (req, res) => {
         ).toString().trim(),
       };
 
-      // 🔍 Check if item already exists
       const existing = await Item.findOne({ code });
 
       if (existing) {
