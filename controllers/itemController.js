@@ -115,7 +115,7 @@ exports.bulkUpdateItems = async (req, res) => {
     const updatedItems = [];
 
     for (const change of changes) {
-      const { code, newQty } = change; // 🔄 changed to code
+      const { code, newQty } = change; 
       const item = await Item.findOne({ code });
       if (!item) continue;
 
@@ -142,6 +142,28 @@ exports.bulkUpdateItems = async (req, res) => {
     });
   } catch (error) {
     console.error("Bulk update error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ✅ Get stock history by CODE
+exports.getItemHistory = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const item = await Item.findOne({ code });
+
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    res.status(200).json({
+      code: item.code,
+      description: item.description,
+      closingQty: item.closingQty,
+      history: item.dailyStock
+    });
+  } catch (error) {
+    console.error("History fetch error:", error);
     res.status(500).json({ error: error.message });
   }
 };
