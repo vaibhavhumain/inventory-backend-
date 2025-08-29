@@ -3,7 +3,8 @@ const mongoose = require('mongoose');
 const dailyStockSchema = new mongoose.Schema({
     date: { type: Date, required: true },
     in: { type: Number, default: 0 },
-    out: { type: Number, default: 0 }
+    out: { type: Number, default: 0 },
+    closingQty: { type: Number, default: 0 }
 }, { _id: false });
 
 const itemSchema = new mongoose.Schema({

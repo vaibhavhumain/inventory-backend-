@@ -77,14 +77,39 @@ exports.updateItemByCode = async (req, res) => {
     delete updateData._id;
     delete updateData.__v;
 
-    const updatedItem = await Item.findOneAndUpdate(
-      { code: req.params.code },
-      updateData,
-      { new: true, runValidators: true }
-    );
+    const item = await Item.findOne({ code: req.params.code });
+    if (!item) return res.status(404).json({ error: 'Item not found' });
 
-    if (!updatedItem) return res.status(404).json({ error: 'Item not found' });
-    res.status(200).json(updatedItem);
+    const today = new Date();
+
+    if (updateData.closingQty !== undefined) {
+      const newQty = Number(updateData.closingQty);
+      let inQty = 0, outQty = 0;
+
+      if (newQty > item.closingQty) inQty = newQty - item.closingQty;
+      if (newQty < item.closingQty) outQty = item.closingQty - newQty;
+
+      item.closingQty = newQty;
+      item.dailyStock.push({
+        date: today,
+        in: inQty,
+        out: outQty,
+        closingQty: newQty,   
+      });
+    }
+
+    item.category = updateData.category ?? item.category;
+    item.description = updateData.description ?? item.description;
+    item.plantName = updateData.plantName ?? item.plantName;
+    item.weight = updateData.weight ?? item.weight;
+    item.unit = updateData.unit ?? item.unit;
+    item.location = updateData.location ?? item.location;
+    item.storeLocation = updateData.storeLocation ?? item.storeLocation;
+    item.remarks = updateData.remarks ?? item.remarks;
+
+    await item.save();
+
+    res.status(200).json(item);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
