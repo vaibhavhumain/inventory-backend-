@@ -8,7 +8,7 @@ const purchaseBillRoutes = require('./routes/purchaseBillRoutes');
 const stockRoutes = require('./routes/stockLedgerRoutes');
 const exportRoutes = require("./routes/exportRoutes");
 const importRoutes = require("./routes/importRoutes");
-
+const issueBillRoutes = require('./routes/issueBillRoutes');
 connectDB();
 
 const app = express();
@@ -29,6 +29,7 @@ app.use('/api/purchase-bills', purchaseBillRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/issue-bills', issueBillRoutes);
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();
