@@ -24,6 +24,6 @@ const itemSchema = new mongoose.Schema({
     subStoreQty: { type: Number, default: 0 },  
     remarks: { type: String, default: null },
     createdAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Item', itemSchema);

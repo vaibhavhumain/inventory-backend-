@@ -14,6 +14,6 @@ const purchaseBillSchema = new mongoose.Schema({
     items: [billItemSchema],
     totalAmount: {type: Number},
     createdAt: {type: Date, default: Date.now}
-});
+} , {timestamps: true });
 
 module.exports = mongoose.model('PurchaseBill', purchaseBillSchema);
