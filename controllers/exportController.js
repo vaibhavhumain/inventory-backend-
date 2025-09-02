@@ -17,10 +17,10 @@ exports.exportDataByDate = async (req, res) => {
     const endDate = new Date(date);
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch (lean for plain objects)
+    // Fetch everything (lean for plain objects)
     const [stockLedger, items, issueBills, purchaseBills] = await Promise.all([
       StockLedger.find({ date: { $gte: startDate, $lte: endDate } }).lean(),
-      Item.find({ createdAt: { $gte: startDate, $lte: endDate } }).lean(),
+      Item.find().lean(), // ✅ all items, always latest values
       IssueBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
         .populate("items.item")
         .lean(),
@@ -34,42 +34,54 @@ exports.exportDataByDate = async (req, res) => {
     // STOCK LEDGER
     const ledgerSheet = workbook.addWorksheet("Stock Ledger");
     ledgerSheet.columns = [
-      { header: "Item Name", key: "itemName", width: 28 },
-      { header: "Quantity", key: "quantity", width: 14 },
-      { header: "Type", key: "type", width: 12 },
+      { header: "Item Code", key: "code", width: 16 },
+      { header: "Item Description", key: "description", width: 28 },
+      { header: "In", key: "in", width: 10 },
+      { header: "Out", key: "out", width: 10 },
+      { header: "Closing Qty", key: "closingQty", width: 14 },
       { header: "Date", key: "date", width: 22 },
       { header: "Remarks", key: "remarks", width: 30 },
     ];
     stockLedger.forEach((e) => {
       ledgerSheet.addRow({
-        itemName: e.itemName || e.item?.description || e.item, // adapt to your schema
-        quantity: e.quantity,
-        type: e.type || e.txnType,
+        code: e.item?.code || "",
+        description: e.item?.description || e.itemName || "",
+        in: e.in || 0,
+        out: e.out || 0,
+        closingQty: e.closingQty,
         date: e.date ? fmt(e.date) : "",
         remarks: e.remarks || "",
       });
     });
 
-    // ITEMS
-    const itemSheet = workbook.addWorksheet("Items");
+    // ITEMS (latest snapshot)
+    const itemSheet = workbook.addWorksheet("Items Snapshot");
     itemSheet.columns = [
       { header: "Code", key: "code", width: 18 },
       { header: "Category", key: "category", width: 20 },
       { header: "Description", key: "description", width: 36 },
+      { header: "Main Store Qty", key: "mainStoreQty", width: 16 },
+      { header: "Sub Store Qty", key: "subStoreQty", width: 16 },
       { header: "Closing Qty", key: "closingQty", width: 14 },
+      { header: "Remarks", key: "remarks", width: 26 },
       { header: "Created At", key: "createdAt", width: 22 },
+      { header: "Updated At", key: "updatedAt", width: 22 },
     ];
     items.forEach((e) =>
       itemSheet.addRow({
         code: e.code,
         category: e.category,
         description: e.description,
+        mainStoreQty: e.mainStoreQty,
+        subStoreQty: e.subStoreQty,
         closingQty: e.closingQty,
+        remarks: e.remarks || "",
         createdAt: e.createdAt ? fmt(e.createdAt) : "",
+        updatedAt: e.updatedAt ? fmt(e.updatedAt) : "",
       })
     );
 
-    // ISSUE BILLS
+    // ISSUE BILLS (for the date)
     const issueSheet = workbook.addWorksheet("Issue Bills");
     issueSheet.columns = [
       { header: "Issue No", key: "issueNo", width: 16 },
@@ -89,13 +101,13 @@ exports.exportDataByDate = async (req, res) => {
             .map((i) => {
               const name =
                 i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity})`;
+              return `${name} (x${i.quantity}) @${i.rate}`;
             })
             .join(", ") || "",
       });
     });
 
-    // PURCHASE BILLS
+    // PURCHASE BILLS (for the date)
     const purchaseSheet = workbook.addWorksheet("Purchase Bills");
     purchaseSheet.columns = [
       { header: "Bill No", key: "billNo", width: 16 },
@@ -121,18 +133,22 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // Optional: make headers bold
+    // Style headers
     [ledgerSheet, itemSheet, issueSheet, purchaseSheet].forEach((ws) => {
       ws.getRow(1).font = { bold: true };
+      ws.columns.forEach((col) => {
+        col.alignment = { vertical: "middle", horizontal: "left" };
+      });
     });
 
+    // Send file
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="inventory-${date}.xlsx"`
+      `attachment; filename="inventory-report-${date}.xlsx"`
     );
 
     await workbook.xlsx.write(res);
