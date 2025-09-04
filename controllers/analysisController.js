@@ -32,7 +32,23 @@ exports.getConsumptionRate = async (req, res) => {
     const issues = await IssueBill.aggregate([
       { $match: { issueDate: { $gte: new Date(startDate), $lte: new Date(endDate) } } },
       { $unwind: "$items" },
-      { $group: { _id: "$items.item", totalIssued: { $sum: "$items.quantity" } } }
+      {
+        $lookup: {
+          from: "items",
+          localField: "items.item",
+          foreignField: "_id",
+          as: "itemDetails"
+        }
+      },
+      { $unwind: "$itemDetails" },
+      {
+        $group: {
+          _id: "$items.item",
+          description: { $first: "$itemDetails.description" },
+          code: { $first: "$itemDetails.code" },
+          totalIssued: { $sum: "$items.quantity" }
+        }
+      }
     ]);
 
     res.json({ consumption: issues });
