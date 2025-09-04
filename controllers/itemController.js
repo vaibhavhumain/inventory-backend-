@@ -1,5 +1,4 @@
 const Item = require('../models/item');
-
 const categoryPrefixes = {
   "raw material": "RM",
   "consumables": "CON",
@@ -28,13 +27,18 @@ exports.createItem = async (req, res) => {
       closingQty,
       stockTaken,
       location,
-      suppliers = [] // ✅ accept suppliers on create
+      storeLocation,     // 🆕 to know where initial stock belongs
+      suppliers = []
     } = req.body;
 
+    // ✅ validate category
     category = category.toLowerCase().trim();
     const prefix = categoryPrefixes[category];
-    if (!prefix) return res.status(400).json({ error: `Invalid category: ${category}` });
+    if (!prefix) {
+      return res.status(400).json({ error: `Invalid category: ${category}` });
+    }
 
+    // ✅ generate sequential code
     const lastItem = await Item.findOne({ category })
       .sort({ code: -1 })
       .collation({ locale: "en", numericOrdering: true });
@@ -48,14 +52,29 @@ exports.createItem = async (req, res) => {
       newCode = `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
     }
 
-    if (!code || (await Item.findOne({ category, code }))) code = newCode;
+    if (!code || (await Item.findOne({ category, code }))) {
+      code = newCode;
+    }
 
+    const today = new Date();
+
+    // ✅ initialize main/sub store split
+    let mainStoreQty = 0;
+    let subStoreQty = 0;
+    if (storeLocation === "main store") {
+      mainStoreQty = closingQty || 0;
+    } else if (storeLocation === "sub store") {
+      subStoreQty = closingQty || 0;
+    }
+
+    // ✅ supplier history
     const supplierHistory = suppliers.map(s => ({
       supplierName: s.name,
       amount: s.amount,
-      date: new Date()
+      date: today
     }));
 
+    // ✅ create item with baseline dailyStock entry
     const item = await Item.create({
       code,
       category,
@@ -66,8 +85,21 @@ exports.createItem = async (req, res) => {
       closingQty,
       stockTaken,
       location,
+      storeLocation,
+      mainStoreQty,
+      subStoreQty,
       suppliers,
-      supplierHistory
+      supplierHistory,
+      dailyStock: [
+        {
+          date: today,
+          in: closingQty || 0,
+          out: 0,
+          closingQty: closingQty || 0,
+          mainStoreQty,
+          subStoreQty
+        }
+      ]
     });
 
     res.status(201).json(item);
