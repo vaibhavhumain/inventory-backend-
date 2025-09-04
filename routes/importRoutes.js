@@ -30,6 +30,7 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
+// 📌 Import Excel
 router.post("/", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
@@ -41,11 +42,18 @@ router.post("/", upload.single("file"), async (req, res) => {
     console.log("Parsed rows:", data.length);
 
     const today = new Date();
+    const skippedRows = [];
 
     for (let idx = 0; idx < data.length; idx++) {
       const row = data[idx];
       const qty = Number(row["Closing Quantity"]) || 0;
-      const code = row["Code"]?.toString().trim() || `AUTO${idx + 1}`;
+
+      // ✅ Only accept code if present
+      const code = row["Code"]?.toString().trim();
+      if (!code) {
+        skippedRows.push({ row: idx + 1, reason: "No code provided" });
+        continue;
+      }
 
       // 🆕 read from Excel → Main Store & Sub Store columns
       const mainStoreQty = Number(row["Main Store"]) || 0;
@@ -97,12 +105,12 @@ router.post("/", upload.single("file"), async (req, res) => {
               stockTaken: newData.stockTaken,
               location: newData.location,
               remarks: newData.remarks,
-
-              // 🔥 update main/sub store
               mainStoreQty: newData.mainStoreQty,
               subStoreQty: newData.subStoreQty
             },
-            $push: { dailyStock: { date: today, in: inQty, out: outQty, closingQty: qty } }
+            $push: {
+              dailyStock: { date: today, in: inQty, out: outQty, closingQty: qty }
+            }
           }
         );
       } else {
@@ -115,14 +123,14 @@ router.post("/", upload.single("file"), async (req, res) => {
 
     res.status(200).json({
       message: "✅ Items imported/updated successfully with history",
-      count: data.length,
+      processed: data.length,
+      skipped: skippedRows
     });
   } catch (error) {
     console.error("Import error:", error);
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // 📌 Get history by code
 router.get("/:code/history", async (req, res) => {
