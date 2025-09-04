@@ -42,17 +42,16 @@ router.post("/", upload.single("file"), async (req, res) => {
     console.log("Parsed rows:", data.length);
 
     const today = new Date();
-    const skippedRows = [];
+    const processedRows = [];
 
     for (let idx = 0; idx < data.length; idx++) {
       const row = data[idx];
       const qty = Number(row["Closing Quantity"]) || 0;
 
-      // ✅ Only accept code if present
-      const code = row["Code"]?.toString().trim();
+      // ✅ If no code provided, set it to null or generate fallback
+      let code = row["Code"]?.toString().trim();
       if (!code) {
-        skippedRows.push({ row: idx + 1, reason: "No code provided" });
-        continue;
+        code = `NO-CODE-${idx + 1}`; // fallback to keep uniqueness
       }
 
       // 🆕 read from Excel → Main Store & Sub Store columns
@@ -87,7 +86,8 @@ router.post("/", upload.single("file"), async (req, res) => {
       const existing = await Item.findOne({ code });
 
       if (existing) {
-        let inQty = 0, outQty = 0;
+        let inQty = 0,
+          outQty = 0;
 
         if (qty > existing.closingQty) inQty = qty - existing.closingQty;
         if (qty < existing.closingQty) outQty = existing.closingQty - qty;
@@ -119,12 +119,14 @@ router.post("/", upload.single("file"), async (req, res) => {
           dailyStock: [{ date: today, in: qty, out: 0, closingQty: qty }]
         });
       }
+
+      processedRows.push({ row: idx + 1, code, description: newData.description });
     }
 
     res.status(200).json({
       message: "✅ Items imported/updated successfully with history",
       processed: data.length,
-      skipped: skippedRows
+      details: processedRows
     });
   } catch (error) {
     console.error("Import error:", error);
@@ -173,7 +175,8 @@ router.put("/:code", async (req, res) => {
 
     if (updateData.closingQty !== undefined) {
       const newQty = Number(updateData.closingQty);
-      let inQty = 0, outQty = 0;
+      let inQty = 0,
+        outQty = 0;
 
       if (newQty > item.closingQty) inQty = newQty - item.closingQty;
       if (newQty < item.closingQty) outQty = item.closingQty - newQty;
