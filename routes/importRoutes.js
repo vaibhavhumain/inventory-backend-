@@ -1,8 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const xlsx = require("xlsx");
-const fs = require("fs");
-const { bulkUpdateItems } = require("../controllers/itemController");
+const Item = require("../models/item");
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
@@ -31,7 +30,8 @@ function normalizeCategory(cat) {
   return mapping[cat] || cat;
 }
 
-router.post("/", upload.single("file"), async (req, res, next) => {
+// 📌 Import Excel
+router.post("/", upload.single("file"), async (req, res) => {
   try {
     console.log("File uploaded:", req.file);
 
@@ -42,30 +42,135 @@ router.post("/", upload.single("file"), async (req, res, next) => {
     console.log("Parsed rows:", data.length);
 
     const today = new Date();
-    const changes = [];
+    const processedRows = [];
 
     for (let idx = 0; idx < data.length; idx++) {
       const row = data[idx];
       const qty = Number(row["Closing Quantity"] || row["Closing Q"]) || 0;
 
+      // ✅ If no code provided, generate fallback
       let code = row["Code"]?.toString().trim();
-      if (!code) code = (idx + 1).toString();
+      if (!code) {
+        code = idx + 1;
+      }
 
+      // 🆕 Main & Sub store qty
       const mainStoreQty = Number(row["Main Store"]) || 0;
       const subStoreQty = Number(row["Sub Store"]) || 0;
 
-      changes.push({
+      // 🆕 Suppliers (from Excel)
+      const supplierName = (row["Supplier Name"] || "").trim();
+      const supplierAmount = Number(row["Supplier Amount"]) || 0;
+      let suppliers = [];
+      let supplierHistory = [];
+
+      if (supplierName) {
+        suppliers.push({ name: supplierName, amount: supplierAmount });
+        supplierHistory.push({
+          supplierName,
+          amount: supplierAmount,
+          date: today
+        });
+      }
+
+      const newData = {
         code,
-        newQty: qty,
+        closingQty: qty,
+        category: normalizeCategory(row["CATEGORY"]) || "",
+        description: (row["ITEM DESCRIPTION"] || "").trim(),
+        plantName: (row["PLANT NAME"] || "").trim(),
+        weight: row["WEIGHT"] || row["WEIGHT per sheet / pipe"]
+          ? Number(row["WEIGHT"] || row["WEIGHT per sheet / pipe"])
+          : undefined,
+        unit: (row["UC"] || row["UOM"] || "").trim(),
+        stockTaken: (row["stock taken qt"] || row["stock taken qty"] || "").trim(),
+        location: (row["Location"] || "").trim(),
+        remarks: (
+          row["Remarks"] ||
+          row["REMARKS"] ||
+          row["remark"] ||
+          row["REMARK"] ||
+          ""
+        ).toString().trim(),
+
         mainStoreQty,
         subStoreQty,
-      });
+        suppliers,
+        supplierHistory
+      };
+
+      const existing = await Item.findOne({ code });
+
+      if (existing) {
+        let inQty = 0, outQty = 0;
+
+        if (qty > existing.closingQty) inQty = qty - existing.closingQty;
+        if (qty < existing.closingQty) outQty = existing.closingQty - qty;
+
+        // Update existing item
+        await Item.findOneAndUpdate(
+          { code: existing.code },
+          {
+            $set: {
+              closingQty: qty,
+              category: newData.category,
+              description: newData.description,
+              plantName: newData.plantName,
+              weight: newData.weight,
+              unit: newData.unit,
+              stockTaken: newData.stockTaken,
+              location: newData.location,
+              remarks: newData.remarks,
+              mainStoreQty: newData.mainStoreQty,
+              subStoreQty: newData.subStoreQty,
+            },
+            $push: {
+              dailyStock: {
+                date: today,
+                in: inQty,
+                out: outQty,
+                closingQty: qty,
+                mainStoreQty: newData.mainStoreQty,
+                subStoreQty: newData.subStoreQty
+              },
+              ...(supplierName && {
+                suppliers: { name: supplierName, amount: supplierAmount },
+                supplierHistory: {
+                  supplierName,
+                  amount: supplierAmount,
+                  date: today
+                }
+              })
+            }
+          },
+          { new: true }
+        );
+      } else {
+        // Create new item
+        await Item.create({
+          ...newData,
+          dailyStock: [{
+            date: today,
+            in: qty,
+            out: 0,
+            closingQty: qty,
+            mainStoreQty,
+            subStoreQty
+          }]
+        });
+      }
+
+      processedRows.push({ row: idx + 1, code, description: newData.description });
     }
 
-    if (req.file?.path) fs.unlinkSync(req.file.path);
+    const items = await Item.find();
 
-    req.body = { date: today, changes };
-    return bulkUpdateItems(req, res, next);
+    res.status(200).json({
+      message: "✅ Items imported/updated successfully with history & suppliers",
+      processed: data.length,
+      details: processedRows,
+      items
+    });
   } catch (error) {
     console.error("Import error:", error);
     res.status(500).json({ error: error.message });
