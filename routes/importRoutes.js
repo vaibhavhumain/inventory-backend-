@@ -46,17 +46,32 @@ router.post("/", upload.single("file"), async (req, res) => {
 
     for (let idx = 0; idx < data.length; idx++) {
       const row = data[idx];
-      const qty = Number(row["Closing Quantity"]) || 0;
+      const qty = Number(row["Closing Quantity"] || row["Closing Q"]) || 0;
 
       // ✅ If no code provided, set it to null or generate fallback
       let code = row["Code"]?.toString().trim();
       if (!code) {
-        code = `NO-CODE-${idx + 1}`; // fallback to keep uniqueness
+        code = idx + 1;
       }
 
-      // 🆕 read from Excel → Main Store & Sub Store columns
+      // 🆕 Main & Sub store qty
       const mainStoreQty = Number(row["Main Store"]) || 0;
       const subStoreQty = Number(row["Sub Store"]) || 0;
+
+      // 🆕 Suppliers (from Excel)
+      const supplierName = (row["Supplier Name"] || "").trim();
+      const supplierAmount = Number(row["Supplier Amount"]) || 0;
+      let suppliers = [];
+      let supplierHistory = [];
+
+      if (supplierName) {
+        suppliers.push({ name: supplierName, amount: supplierAmount });
+        supplierHistory.push({
+          supplierName,
+          amount: supplierAmount,
+          date: today
+        });
+      }
 
       const newData = {
         code,
@@ -64,11 +79,11 @@ router.post("/", upload.single("file"), async (req, res) => {
         category: normalizeCategory(row["CATEGORY"]) || "",
         description: (row["ITEM DESCRIPTION"] || "").trim(),
         plantName: (row["PLANT NAME"] || "").trim(),
-        weight: row["WEIGHT per sheet / pipe"]
-          ? Number(row["WEIGHT per sheet / pipe"])
+        weight: row["WEIGHT"] || row["WEIGHT per sheet / pipe"]
+          ? Number(row["WEIGHT"] || row["WEIGHT per sheet / pipe"])
           : undefined,
-        unit: (row["UOM"] || "").trim(),
-        stockTaken: (row["stock taken qty"] || "").trim(),
+        unit: (row["UC"] || row["UOM"] || "").trim(),
+        stockTaken: (row["stock taken qt"] || row["stock taken qty"] || "").trim(),
         location: (row["Location"] || "").trim(),
         remarks: (
           row["Remarks"] ||
@@ -78,20 +93,21 @@ router.post("/", upload.single("file"), async (req, res) => {
           ""
         ).toString().trim(),
 
-        // 🔥 new fields
         mainStoreQty,
-        subStoreQty
+        subStoreQty,
+        suppliers,
+        supplierHistory
       };
 
       const existing = await Item.findOne({ code });
 
       if (existing) {
-        let inQty = 0,
-          outQty = 0;
+        let inQty = 0, outQty = 0;
 
         if (qty > existing.closingQty) inQty = qty - existing.closingQty;
         if (qty < existing.closingQty) outQty = existing.closingQty - qty;
 
+        // Update existing item
         await Item.updateOne(
           { code: existing.code },
           {
@@ -106,14 +122,23 @@ router.post("/", upload.single("file"), async (req, res) => {
               location: newData.location,
               remarks: newData.remarks,
               mainStoreQty: newData.mainStoreQty,
-              subStoreQty: newData.subStoreQty
+              subStoreQty: newData.subStoreQty,
             },
             $push: {
-              dailyStock: { date: today, in: inQty, out: outQty, closingQty: qty }
+              dailyStock: { date: today, in: inQty, out: outQty, closingQty: qty },
+              ...(supplierName && {
+                suppliers: { name: supplierName, amount: supplierAmount },
+                supplierHistory: {
+                  supplierName,
+                  amount: supplierAmount,
+                  date: today
+                }
+              })
             }
           }
         );
       } else {
+        // Create new item
         await Item.create({
           ...newData,
           dailyStock: [{ date: today, in: qty, out: 0, closingQty: qty }]
@@ -124,7 +149,7 @@ router.post("/", upload.single("file"), async (req, res) => {
     }
 
     res.status(200).json({
-      message: "✅ Items imported/updated successfully with history",
+      message: "✅ Items imported/updated successfully with history & suppliers",
       processed: data.length,
       details: processedRows
     });
@@ -148,7 +173,9 @@ router.get("/:code/history", async (req, res) => {
       code: item.code,
       description: item.description,
       closingQty: item.closingQty,
-      history: item.dailyStock
+      history: item.dailyStock,
+      suppliers: item.suppliers,
+      supplierHistory: item.supplierHistory
     });
   } catch (error) {
     console.error("History fetch error:", error);
@@ -162,7 +189,6 @@ router.put("/:code", async (req, res) => {
     const { code } = req.params;
     const updateData = { ...req.body };
 
-    // 🚨 Ensure _id and __v don’t get passed to Mongoose
     delete updateData._id;
     delete updateData.__v;
 
@@ -173,10 +199,10 @@ router.put("/:code", async (req, res) => {
 
     const today = new Date();
 
+    // Handle closing qty update with stock history
     if (updateData.closingQty !== undefined) {
       const newQty = Number(updateData.closingQty);
-      let inQty = 0,
-        outQty = 0;
+      let inQty = 0, outQty = 0;
 
       if (newQty > item.closingQty) inQty = newQty - item.closingQty;
       if (newQty < item.closingQty) outQty = item.closingQty - newQty;
@@ -185,7 +211,22 @@ router.put("/:code", async (req, res) => {
       item.dailyStock.push({ date: today, in: inQty, out: outQty });
     }
 
-    // ✅ merge only safe fields
+    // Handle supplier update
+    if (updateData.supplierName && updateData.supplierAmount) {
+      const newSupplier = {
+        name: updateData.supplierName,
+        amount: updateData.supplierAmount
+      };
+
+      item.suppliers.push(newSupplier);
+      item.supplierHistory.push({
+        supplierName: newSupplier.name,
+        amount: newSupplier.amount,
+        date: today
+      });
+    }
+
+    // Merge safe fields
     item.category = updateData.category ?? item.category;
     item.description = updateData.description ?? item.description;
     item.plantName = updateData.plantName ?? item.plantName;

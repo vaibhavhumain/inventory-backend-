@@ -18,9 +18,20 @@ const categoryPrefixes = {
 // ✅ Create Item
 exports.createItem = async (req, res) => {
   try {
-    let { code, category, description, plantName, weight, unit, closingQty, stockTaken, location } = req.body;
-    category = category.toLowerCase().trim();
+    let {
+      code,
+      category,
+      description,
+      plantName,
+      weight,
+      unit,
+      closingQty,
+      stockTaken,
+      location,
+      suppliers = [] // ✅ accept suppliers on create
+    } = req.body;
 
+    category = category.toLowerCase().trim();
     const prefix = categoryPrefixes[category];
     if (!prefix) return res.status(400).json({ error: `Invalid category: ${category}` });
 
@@ -39,8 +50,24 @@ exports.createItem = async (req, res) => {
 
     if (!code || (await Item.findOne({ category, code }))) code = newCode;
 
+    const supplierHistory = suppliers.map(s => ({
+      supplierName: s.name,
+      amount: s.amount,
+      date: new Date()
+    }));
+
     const item = await Item.create({
-      code, category, description, plantName, weight, unit, closingQty, stockTaken, location
+      code,
+      category,
+      description,
+      plantName,
+      weight,
+      unit,
+      closingQty,
+      stockTaken,
+      location,
+      suppliers,
+      supplierHistory
     });
 
     res.status(201).json(item);
@@ -71,35 +98,43 @@ exports.getItemByCode = async (req, res) => {
 };
 
 // ✅ Update item by CODE
-// ✅ Update item by CODE
 exports.updateItemByCode = async (req, res) => {
   try {
     const { code } = req.params;
-    const { description, category, plantName, weight, unit, remarks, addQty, targetStore } = req.body;
+    const {
+      description,
+      category,
+      plantName,
+      weight,
+      unit,
+      remarks,
+      addQty,
+      targetStore,
+      mainStoreQty,
+      subStoreQty,
+      supplierName,
+      supplierAmount
+    } = req.body;
 
-    let { mainStoreQty, subStoreQty } = req.body;
     const item = await Item.findOne({ code });
     if (!item) return res.status(404).json({ error: "Item not found" });
 
     const today = new Date();
 
+    let newMain = mainStoreQty ?? item.mainStoreQty;
+    let newSub = subStoreQty ?? item.subStoreQty;
+
     // ✅ Increment mode
     if (addQty !== undefined && targetStore) {
       if (targetStore === "Main Store") {
-        mainStoreQty = (item.mainStoreQty || 0) + Number(addQty);
-        subStoreQty = item.subStoreQty || 0;
+        newMain = (item.mainStoreQty || 0) + Number(addQty);
       } else if (targetStore === "Sub Store") {
-        subStoreQty = (item.subStoreQty || 0) + Number(addQty);
-        mainStoreQty = item.mainStoreQty || 0;
+        newSub = (item.subStoreQty || 0) + Number(addQty);
       }
-    } else {
-      // ✅ Absolute values mode
-      mainStoreQty = mainStoreQty ?? item.mainStoreQty;
-      subStoreQty = subStoreQty ?? item.subStoreQty;
     }
 
     // ✅ Always recalc closing qty
-    const newClosing = Number(mainStoreQty) + Number(subStoreQty);
+    const newClosing = Number(newMain) + Number(newSub);
     const oldClosing = item.closingQty || 0;
 
     let inQty = 0, outQty = 0;
@@ -114,8 +149,8 @@ exports.updateItemByCode = async (req, res) => {
     item.unit = unit ?? item.unit;
     item.remarks = remarks ?? item.remarks;
 
-    item.mainStoreQty = mainStoreQty;
-    item.subStoreQty = subStoreQty;
+    item.mainStoreQty = newMain;
+    item.subStoreQty = newSub;
     item.closingQty = newClosing;
 
     // ✅ Add stock history (with store snapshot)
@@ -125,8 +160,19 @@ exports.updateItemByCode = async (req, res) => {
         in: inQty,
         out: outQty,
         closingQty: newClosing,
-        mainStoreQty,
-        subStoreQty
+        mainStoreQty: newMain,
+        subStoreQty: newSub
+      });
+    }
+
+    // ✅ Add supplier update if present
+    if (supplierName && supplierAmount) {
+      const newSupplier = { name: supplierName, amount: supplierAmount };
+      item.suppliers.push(newSupplier);
+      item.supplierHistory.push({
+        supplierName,
+        amount: supplierAmount,
+        date: today
       });
     }
 
@@ -162,7 +208,7 @@ exports.bulkUpdateItems = async (req, res) => {
     const updatedItems = [];
 
     for (const change of changes) {
-      const { code, newQty } = change; 
+      const { code, newQty } = change;
       const item = await Item.findOne({ code });
       if (!item) continue;
 
@@ -194,7 +240,7 @@ exports.bulkUpdateItems = async (req, res) => {
   }
 };
 
-// ✅ Get stock history by CODE
+// ✅ Get stock + supplier history by CODE
 exports.getItemHistory = async (req, res) => {
   try {
     const { code } = req.params;
@@ -208,10 +254,50 @@ exports.getItemHistory = async (req, res) => {
       code: item.code,
       description: item.description,
       closingQty: item.closingQty,
-      history: item.dailyStock
+      history: item.dailyStock,
+      suppliers: item.suppliers,
+      supplierHistory: item.supplierHistory
     });
   } catch (error) {
     console.error("History fetch error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
+// ✅ Add a supplier to an item by CODE
+exports.addSupplierToItem = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const { supplierName, supplierAmount } = req.body;
+
+    if (!supplierName || !supplierAmount) {
+      return res.status(400).json({ error: "Supplier name and amount are required" });
+    }
+
+    const item = await Item.findOne({ code });
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const today = new Date();
+
+    item.suppliers.push({ name: supplierName, amount: supplierAmount });
+
+    item.supplierHistory.push({
+      supplierName,
+      amount: supplierAmount,
+      date: today
+    });
+
+    await item.save();
+
+    res.status(200).json({
+      message: "✅ Supplier added successfully",
+      item
+    });
+  } catch (error) {
+    console.error("Add supplier error:", error);
     res.status(500).json({ error: error.message });
   }
 };

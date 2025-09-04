@@ -8,12 +8,14 @@ const {
   deleteItemByCode,
   bulkUpdateItems,
   getItemHistory,
+  addSupplierToItem,
 } = require('../controllers/itemController');
 
 const router = express.Router();
 
 router.post('/', createItem);
 router.post('/bulk-update', bulkUpdateItems);
+router.post('/:code/suppliers',addSupplierToItem);
 router.get('/', getItems);
 
 // 🟢 use :code instead of :id
