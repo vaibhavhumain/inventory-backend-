@@ -208,20 +208,28 @@ exports.bulkUpdateItems = async (req, res) => {
     const updatedItems = [];
 
     for (const change of changes) {
-      const { code, newQty } = change;
+      const { code, newQty, mainStoreQty, subStoreQty } = change;
       const item = await Item.findOne({ code });
       if (!item) continue;
 
       const oldQty = item.closingQty || 0;
       const difference = newQty - oldQty;
+      if (mainStoreQty !== undefined) item.mainStoreQty = mainStoreQty;
+      if (subStoreQty !== undefined) item.subStoreQty = subStoreQty;
+      if (mainStoreQty !== undefined || subStoreQty !== undefined) {
+        item.closingQty = (item.mainStoreQty || 0) + (item.subStoreQty || 0);
+      } else {
+        item.closingQty = newQty;
+      }
 
-      item.closingQty = newQty;
       if (difference !== 0) {
         item.dailyStock.push({
           date: new Date(date),
           in: difference > 0 ? difference : 0,
           out: difference < 0 ? Math.abs(difference) : 0,
-          closingQty: newQty,
+          closingQty: item.closingQty,
+          mainStoreQty: item.mainStoreQty || 0,
+          subStoreQty: item.subStoreQty || 0
         });
       }
 
@@ -239,6 +247,7 @@ exports.bulkUpdateItems = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // ✅ Get stock + supplier history by CODE
 exports.getItemHistory = async (req, res) => {
