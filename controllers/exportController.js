@@ -8,7 +8,6 @@ const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
 
 exports.exportData = async (req, res) => {
   try {
-    // ✅ Accept from/to as query
     let { from, to } = req.query;
 
     if (!from) {
