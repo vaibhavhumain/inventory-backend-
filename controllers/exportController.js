@@ -6,19 +6,29 @@ const PurchaseBill = require("../models/purchaseBill");
 const IST = "Asia/Kolkata";
 const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
 
-exports.exportDataByDate = async (req, res) => {
+exports.exportData = async (req, res) => {
   try {
-    const { date } = req.params;
-    const startDate = new Date(date);
-    if (isNaN(startDate.getTime())) {
-      return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD." });
+    // ✅ Accept from/to as query
+    let { from, to } = req.query;
+
+    if (!from) {
+      return res
+        .status(400)
+        .json({ error: "Please provide ?from=YYYY-MM-DD" });
     }
-    const endDate = new Date(date);
+
+    const startDate = new Date(from);
+    const endDate = to ? new Date(to) : new Date(from);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({ error: "Invalid date(s). Use YYYY-MM-DD." });
+    }
+
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch items + bills
+    // Fetch data
     const [items, issueBills, purchaseBills] = await Promise.all([
-      Item.find().lean(), // ✅ items contain dailyStock + supplierHistory
+      Item.find().lean(),
       IssueBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
         .populate("items.item")
         .lean(),
@@ -29,7 +39,7 @@ exports.exportDataByDate = async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
 
-    // STOCK LEDGER (from item.dailyStock filtered by date)
+    // === STOCK LEDGER ===
     const ledgerSheet = workbook.addWorksheet("Stock Ledger");
     ledgerSheet.columns = [
       { header: "Item Code", key: "code", width: 16 },
@@ -61,7 +71,7 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // ITEMS SNAPSHOT
+    // === ITEMS SNAPSHOT ===
     const itemSheet = workbook.addWorksheet("Items Snapshot");
     itemSheet.columns = [
       { header: "Code", key: "code", width: 18 },
@@ -94,7 +104,7 @@ exports.exportDataByDate = async (req, res) => {
       })
     );
 
-    // SUPPLIER HISTORY
+    // === SUPPLIER HISTORY ===
     const supplierSheet = workbook.addWorksheet("Supplier History");
     supplierSheet.columns = [
       { header: "Item Code", key: "code", width: 18 },
@@ -117,7 +127,7 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // ISSUE BILLS
+    // === ISSUE BILLS ===
     const issueSheet = workbook.addWorksheet("Issue Bills");
     issueSheet.columns = [
       { header: "Issue No", key: "issueNo", width: 16 },
@@ -143,7 +153,7 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // PURCHASE BILLS
+    // === PURCHASE BILLS ===
     const purchaseSheet = workbook.addWorksheet("Purchase Bills");
     purchaseSheet.columns = [
       { header: "Bill No", key: "billNo", width: 16 },
@@ -169,7 +179,7 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // Style headers
+    // === Style headers ===
     [ledgerSheet, itemSheet, supplierSheet, issueSheet, purchaseSheet].forEach(
       (ws) => {
         ws.getRow(1).font = { bold: true };
@@ -179,14 +189,14 @@ exports.exportDataByDate = async (req, res) => {
       }
     );
 
-    // Send file
+    // === Send file ===
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="inventory-report-${date}.xlsx"`
+      `attachment; filename="inventory-report-${from}_to_${to || from}.xlsx"`
     );
 
     await workbook.xlsx.write(res);
