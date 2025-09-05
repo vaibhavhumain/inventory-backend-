@@ -1,5 +1,4 @@
 const ExcelJS = require("exceljs");
-const StockLedger = require("../models/stockLedger");
 const Item = require("../models/item");
 const IssueBill = require("../models/issueBill");
 const PurchaseBill = require("../models/purchaseBill");
@@ -17,10 +16,9 @@ exports.exportDataByDate = async (req, res) => {
     const endDate = new Date(date);
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch everything (lean for plain objects)
-    const [stockLedger, items, issueBills, purchaseBills] = await Promise.all([
-      StockLedger.find({ date: { $gte: startDate, $lte: endDate } }).lean(),
-      Item.find().lean(), // ✅ all items, always latest values
+    // Fetch items + bills
+    const [items, issueBills, purchaseBills] = await Promise.all([
+      Item.find().lean(), // ✅ items contain dailyStock + supplierHistory
       IssueBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
         .populate("items.item")
         .lean(),
@@ -31,7 +29,7 @@ exports.exportDataByDate = async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
 
-    // STOCK LEDGER
+    // STOCK LEDGER (from item.dailyStock filtered by date)
     const ledgerSheet = workbook.addWorksheet("Stock Ledger");
     ledgerSheet.columns = [
       { header: "Item Code", key: "code", width: 16 },
@@ -39,27 +37,39 @@ exports.exportDataByDate = async (req, res) => {
       { header: "In", key: "in", width: 10 },
       { header: "Out", key: "out", width: 10 },
       { header: "Closing Qty", key: "closingQty", width: 14 },
+      { header: "Main Store", key: "mainStoreQty", width: 14 },
+      { header: "Sub Store", key: "subStoreQty", width: 14 },
       { header: "Date", key: "date", width: 22 },
       { header: "Remarks", key: "remarks", width: 30 },
     ];
-    stockLedger.forEach((e) => {
-      ledgerSheet.addRow({
-        code: e.item?.code || "",
-        description: e.item?.description || e.itemName || "",
-        in: e.in || 0,
-        out: e.out || 0,
-        closingQty: e.closingQty,
-        date: e.date ? fmt(e.date) : "",
-        remarks: e.remarks || "",
+
+    items.forEach((item) => {
+      (item.dailyStock || []).forEach((ds) => {
+        if (ds.date >= startDate && ds.date <= endDate) {
+          ledgerSheet.addRow({
+            code: item.code,
+            description: item.description,
+            in: ds.in || 0,
+            out: ds.out || 0,
+            closingQty: ds.closingQty,
+            mainStoreQty: ds.mainStoreQty,
+            subStoreQty: ds.subStoreQty,
+            date: ds.date ? fmt(ds.date) : "",
+            remarks: item.remarks || "",
+          });
+        }
       });
     });
 
-    // ITEMS (latest snapshot)
+    // ITEMS SNAPSHOT
     const itemSheet = workbook.addWorksheet("Items Snapshot");
     itemSheet.columns = [
       { header: "Code", key: "code", width: 18 },
       { header: "Category", key: "category", width: 20 },
       { header: "Description", key: "description", width: 36 },
+      { header: "Plant", key: "plantName", width: 20 },
+      { header: "Weight", key: "weight", width: 14 },
+      { header: "Unit", key: "unit", width: 10 },
       { header: "Main Store Qty", key: "mainStoreQty", width: 16 },
       { header: "Sub Store Qty", key: "subStoreQty", width: 16 },
       { header: "Closing Qty", key: "closingQty", width: 14 },
@@ -72,6 +82,9 @@ exports.exportDataByDate = async (req, res) => {
         code: e.code,
         category: e.category,
         description: e.description,
+        plantName: e.plantName,
+        weight: e.weight,
+        unit: e.unit,
         mainStoreQty: e.mainStoreQty,
         subStoreQty: e.subStoreQty,
         closingQty: e.closingQty,
@@ -81,7 +94,30 @@ exports.exportDataByDate = async (req, res) => {
       })
     );
 
-    // ISSUE BILLS (for the date)
+    // SUPPLIER HISTORY
+    const supplierSheet = workbook.addWorksheet("Supplier History");
+    supplierSheet.columns = [
+      { header: "Item Code", key: "code", width: 18 },
+      { header: "Item Description", key: "description", width: 30 },
+      { header: "Supplier", key: "supplierName", width: 28 },
+      { header: "Amount", key: "amount", width: 18 },
+      { header: "Date", key: "date", width: 22 },
+    ];
+    items.forEach((item) => {
+      (item.supplierHistory || []).forEach((sh) => {
+        if (sh.date >= startDate && sh.date <= endDate) {
+          supplierSheet.addRow({
+            code: item.code,
+            description: item.description,
+            supplierName: sh.supplierName,
+            amount: sh.amount,
+            date: sh.date ? fmt(sh.date) : "",
+          });
+        }
+      });
+    });
+
+    // ISSUE BILLS
     const issueSheet = workbook.addWorksheet("Issue Bills");
     issueSheet.columns = [
       { header: "Issue No", key: "issueNo", width: 16 },
@@ -107,7 +143,7 @@ exports.exportDataByDate = async (req, res) => {
       });
     });
 
-    // PURCHASE BILLS (for the date)
+    // PURCHASE BILLS
     const purchaseSheet = workbook.addWorksheet("Purchase Bills");
     purchaseSheet.columns = [
       { header: "Bill No", key: "billNo", width: 16 },
@@ -134,12 +170,14 @@ exports.exportDataByDate = async (req, res) => {
     });
 
     // Style headers
-    [ledgerSheet, itemSheet, issueSheet, purchaseSheet].forEach((ws) => {
-      ws.getRow(1).font = { bold: true };
-      ws.columns.forEach((col) => {
-        col.alignment = { vertical: "middle", horizontal: "left" };
-      });
-    });
+    [ledgerSheet, itemSheet, supplierSheet, issueSheet, purchaseSheet].forEach(
+      (ws) => {
+        ws.getRow(1).font = { bold: true };
+        ws.columns.forEach((col) => {
+          col.alignment = { vertical: "middle", horizontal: "left" };
+        });
+      }
+    );
 
     // Send file
     res.setHeader(
