@@ -112,3 +112,32 @@ exports.getTurnoverRatios = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// controllers/analysisController.js
+exports.getConsumptionTrend = async (req, res) => {
+  try {
+    const issues = await IssueBill.aggregate([
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$issueDate" },
+            month: { $month: "$issueDate" },
+          },
+          totalIssued: { $sum: "$items.quantity" },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } }
+    ]);
+
+    const formatted = issues.map(i => ({
+      year: i._id.year,
+      month: i._id.month,
+      totalIssued: i.totalIssued,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
