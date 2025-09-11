@@ -1,4 +1,5 @@
 const Item = require('../models/item');
+const PurchaseBill = require('../models/purchaseBill');
 const categoryPrefixes = {
   "raw material": "RM",
   "consumables": "CON",
@@ -27,18 +28,16 @@ exports.createItem = async (req, res) => {
       closingQty,
       stockTaken,
       location,
-      storeLocation,     // 🆕 to know where initial stock belongs
+      storeLocation,
       suppliers = []
     } = req.body;
 
-    // ✅ validate category
     category = category.toLowerCase().trim();
     const prefix = categoryPrefixes[category];
     if (!prefix) {
       return res.status(400).json({ error: `Invalid category: ${category}` });
     }
 
-    // ✅ generate sequential code
     const lastItem = await Item.findOne({ category })
       .sort({ code: -1 })
       .collation({ locale: "en", numericOrdering: true });
@@ -58,7 +57,6 @@ exports.createItem = async (req, res) => {
 
     const today = new Date();
 
-    // ✅ initialize main/sub store split
     let mainStoreQty = 0;
     let subStoreQty = 0;
     if (storeLocation === "main store") {
@@ -67,14 +65,12 @@ exports.createItem = async (req, res) => {
       subStoreQty = closingQty || 0;
     }
 
-    // ✅ supplier history
-    const supplierHistory = suppliers.map(s => ({
+    const supplierHistory = suppliers.map((s) => ({
       supplierName: s.name,
       amount: s.amount,
       date: today
     }));
 
-    // ✅ create item with baseline dailyStock entry
     const item = await Item.create({
       code,
       category,
@@ -102,8 +98,33 @@ exports.createItem = async (req, res) => {
       ]
     });
 
+    if (closingQty && closingQty > 0) {
+      const firstSupplier = suppliers && suppliers.length > 0 ? suppliers[0] : null;
+
+      const rate = firstSupplier?.amount ? Number(firstSupplier.amount) : 0;
+      const totalAmount = rate * closingQty;
+
+      const purchaseBill = new PurchaseBill({
+        billNo: "INIT-" + Date.now(),
+        billDate: today,
+        supplierName: firstSupplier?.name || "Opening Balance",
+        items: [
+          {
+            item: item._id,
+            quantity: closingQty,
+            rate,
+            amount: totalAmount
+          }
+        ],
+        totalAmount
+      });
+
+      await purchaseBill.save();
+    }
+
     res.status(201).json(item);
   } catch (error) {
+    console.error("Error creating item:", error);
     res.status(400).json({ error: error.message });
   }
 };

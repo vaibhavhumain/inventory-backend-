@@ -146,7 +146,7 @@ exports.exportData = async (req, res) => {
             .map((i) => {
               const name =
                 i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity}) @${i.rate}`;
+              return `${name} (x${i.quantity})`; // ✅ no rate here
             })
             .join(", ") || "",
       });
@@ -172,7 +172,7 @@ exports.exportData = async (req, res) => {
             .map((i) => {
               const name =
                 i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity}) @${i.rate}`;
+              return `${name} (x${i.quantity}) @${i.rate}`; // ✅ keep rate here
             })
             .join(", ") || "",
       });
