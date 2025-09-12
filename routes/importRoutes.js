@@ -1,179 +1,147 @@
 const express = require("express");
 const multer = require("multer");
 const xlsx = require("xlsx");
+const fs = require("fs/promises");
 const Item = require("../models/item");
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 
-function normalizeCategory(cat) {
-  if (!cat) return null;
-  cat = cat.toLowerCase().trim();
+// OPTIONAL but recommended in your Item schema:
+// ItemSchema.index({ code: 1 }, { unique: true });
 
-  const mapping = {
+const val = (v) => (v === null || v === undefined ? undefined : String(v).trim());
+const num = (v) => {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+const normalizeCategory = (cat) => {
+  if (!cat) return undefined;
+  cat = String(cat).toLowerCase().trim();
+  const map = {
     "raw material": "raw material",
     "raw materials": "raw material",
-    "consumables": "consumables",
-    "consumeables": "consumables",
+    consumables: "consumables",
+    consumeables: "consumables",
     "bought out": "bought out",
-    "hardware": "hardware",
-    "electronics": "electronics",
-    "electricals": "electricals",
-    "paints": "paints",
-    "rubbers": "rubbers",
-    "chemicals": "chemicals",
-    "adhessive": "adhesive",
-    "adhesive": "adhesive",
-    "plastics": "plastics"
+    hardware: "hardware",
+    electronics: "electronics",
+    electricals: "electricals",
+    paints: "paints",
+    rubbers: "rubbers",
+    chemicals: "chemicals",
+    adhessive: "adhesive",
+    adhesive: "adhesive",
+    plastics: "plastics",
   };
+  return map[cat] || cat;
+};
 
-  return mapping[cat] || cat;
+// Build a document strictly from what the row provides.
+// Only set a field if the cell exists; otherwise leave it out.
+function makeDocFromRow(row) {
+  const doc = {};
+  // Primary key to identify rows
+  const code = val(row["Code"]);
+  if (code) doc.code = code; // if your schema requires code, this must exist
+
+  // Map only known columns; don’t invent defaults
+  const closingQty = num(row["Closing Quantity"] ?? row["Closing Q"]);
+  if (closingQty !== undefined) doc.closingQty = closingQty;
+
+  const category = normalizeCategory(row["CATEGORY"]);
+  if (category !== undefined) doc.category = category;
+
+  const description = val(row["ITEM DESCRIPTION"]);
+  if (description !== undefined) doc.description = description;
+
+  const plantName = val(row["PLANT NAME"]);
+  if (plantName !== undefined) doc.plantName = plantName;
+
+  const weightSrc = row["WEIGHT"] ?? row["WEIGHT per sheet / pipe"];
+  const weight = num(weightSrc);
+  if (weight !== undefined) doc.weight = weight;
+
+  const unit = val(row["UC"] ?? row["UOM"]);
+  if (unit !== undefined) doc.unit = unit;
+
+  const stockTaken = val(row["stock taken qt"] ?? row["stock taken qty"]);
+  if (stockTaken !== undefined) doc.stockTaken = stockTaken;
+
+  const location = val(row["Location"]);
+  if (location !== undefined) doc.location = location;
+
+  const remarks = val(row["Remarks"] ?? row["REMARKS"] ?? row["remark"] ?? row["REMARK"]);
+  if (remarks !== undefined) doc.remarks = remarks;
+
+  const mainStoreQty = num(row["Main Store"]);
+  if (mainStoreQty !== undefined) doc.mainStoreQty = mainStoreQty;
+
+  const subStoreQty = num(row["Sub Store"]);
+  if (subStoreQty !== undefined) doc.subStoreQty = subStoreQty;
+
+  return doc;
 }
 
-// 📌 Import Excel
+let importLock = false;
+
 router.post("/", upload.single("file"), async (req, res) => {
+  if (importLock) return res.status(409).json({ error: "Import already in progress." });
+  importLock = true;
+
   try {
-    console.log("File uploaded:", req.file);
+    if (!req.file?.path) return res.status(400).json({ error: "No file uploaded" });
 
-    const workbook = xlsx.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+    const wb = xlsx.readFile(req.file.path);
+    const sheet = wb.SheetNames[0];
+    const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheet], { defval: "" });
 
-    console.log("Parsed rows:", data.length);
+    const seen = new Set();
+    const duplicates = [];
+    const docs = [];
 
-    const today = new Date();
-    const processedRows = [];
+    for (const r of rows) {
+      const d = makeDocFromRow(r);
 
-    for (let idx = 0; idx < data.length; idx++) {
-      const row = data[idx];
-      const qty = Number(row["Closing Quantity"] || row["Closing Q"]) || 0;
+      // If your schema requires 'code', skip rows without it
+      if (!d.code) continue;
 
-      // ✅ If no code provided, generate fallback
-      let code = row["Code"]?.toString().trim();
-      if (!code) {
-        code = idx + 1;
+      if (seen.has(d.code)) {
+        duplicates.push(d.code);
+        continue;
       }
-
-      // 🆕 Main & Sub store qty
-      const mainStoreQty = Number(row["Main Store"]) || 0;
-      const subStoreQty = Number(row["Sub Store"]) || 0;
-
-      // 🆕 Suppliers (from Excel)
-      const supplierName = (row["Supplier Name"] || "").trim();
-      const supplierAmount = Number(row["Supplier Amount"]) || 0;
-      let suppliers = [];
-      let supplierHistory = [];
-
-      if (supplierName) {
-        suppliers.push({ name: supplierName, amount: supplierAmount });
-        supplierHistory.push({
-          supplierName,
-          amount: supplierAmount,
-          date: today
-        });
-      }
-
-      const newData = {
-        code,
-        closingQty: qty,
-        category: normalizeCategory(row["CATEGORY"]) || "",
-        description: (row["ITEM DESCRIPTION"] || "").trim(),
-        plantName: (row["PLANT NAME"] || "").trim(),
-        weight: row["WEIGHT"] || row["WEIGHT per sheet / pipe"]
-          ? Number(row["WEIGHT"] || row["WEIGHT per sheet / pipe"])
-          : undefined,
-        unit: (row["UC"] || row["UOM"] || "").trim(),
-        stockTaken: (row["stock taken qt"] || row["stock taken qty"] || "").trim(),
-        location: (row["Location"] || "").trim(),
-        remarks: (
-          row["Remarks"] ||
-          row["REMARKS"] ||
-          row["remark"] ||
-          row["REMARK"] ||
-          ""
-        ).toString().trim(),
-
-        mainStoreQty,
-        subStoreQty,
-        suppliers,
-        supplierHistory
-      };
-
-      const existing = await Item.findOne({ code });
-
-      if (existing) {
-        let inQty = 0, outQty = 0;
-
-        if (qty > existing.closingQty) inQty = qty - existing.closingQty;
-        if (qty < existing.closingQty) outQty = existing.closingQty - qty;
-
-        // Update existing item
-        await Item.findOneAndUpdate(
-          { code: existing.code },
-          {
-            $set: {
-              closingQty: qty,
-              category: newData.category,
-              description: newData.description,
-              plantName: newData.plantName,
-              weight: newData.weight,
-              unit: newData.unit,
-              stockTaken: newData.stockTaken,
-              location: newData.location,
-              remarks: newData.remarks,
-              mainStoreQty: newData.mainStoreQty,
-              subStoreQty: newData.subStoreQty,
-            },
-            $push: {
-              dailyStock: {
-                date: today,
-                in: inQty,
-                out: outQty,
-                closingQty: qty,
-                mainStoreQty: newData.mainStoreQty,
-                subStoreQty: newData.subStoreQty
-              },
-              ...(supplierName && {
-                suppliers: { name: supplierName, amount: supplierAmount },
-                supplierHistory: {
-                  supplierName,
-                  amount: supplierAmount,
-                  date: today
-                }
-              })
-            }
-          },
-          { new: true }
-        );
-      } else {
-        // Create new item
-        await Item.create({
-          ...newData,
-          dailyStock: [{
-            date: today,
-            in: qty,
-            out: 0,
-            closingQty: qty,
-            mainStoreQty,
-            subStoreQty
-          }]
-        });
-      }
-
-      processedRows.push({ row: idx + 1, code, description: newData.description });
+      seen.add(d.code);
+      docs.push(d);
     }
 
-    const items = await Item.find();
+    // 1) Replace/Upsert each row exactly as in Excel (no $set/$push — full replacement)
+    const ops = docs.map((d) => ({
+      replaceOne: {
+        filter: { code: d.code },
+        replacement: d,
+        upsert: true,
+      },
+    }));
+    if (ops.length) await Item.bulkWrite(ops, { ordered: false });
 
-    res.status(200).json({
-      message: "✅ Items imported/updated successfully with history & suppliers",
-      processed: data.length,
-      details: processedRows,
-      items
+    // 2) Remove anything not present in the file
+    await Item.deleteMany({ code: { $nin: Array.from(seen) } });
+
+    const total = await Item.countDocuments();
+    res.json({
+      message: "✅ Mirror import complete. DB now matches the Excel file.",
+      insertedOrReplaced: docs.length,
+      removedNotInFile: true,
+      duplicateCodesSkipped: Array.from(new Set(duplicates)),
+      totalItems: total,
     });
-  } catch (error) {
-    console.error("Import error:", error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("Import error:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    importLock = false;
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
   }
 });
 
