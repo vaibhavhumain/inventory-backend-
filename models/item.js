@@ -21,7 +21,7 @@ const supplierHistorySchema = new mongoose.Schema({
 }, { _id: false });
 
 const itemSchema = new mongoose.Schema({
-  code: { type: String, unique: true },
+  code: { type: String},
   category: { type: String },
   description: { type: String },
   plantName: { type: String },

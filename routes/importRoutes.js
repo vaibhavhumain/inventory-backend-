@@ -7,15 +7,15 @@ const Item = require("../models/item");
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 
-// OPTIONAL but recommended in your Item schema:
-// ItemSchema.index({ code: 1 }, { unique: true });
+const val = (v) =>
+  v === null || v === undefined ? undefined : String(v).trim();
 
-const val = (v) => (v === null || v === undefined ? undefined : String(v).trim());
 const num = (v) => {
   if (v === null || v === undefined || v === "") return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
 };
+
 const normalizeCategory = (cat) => {
   if (!cat) return undefined;
   cat = String(cat).toLowerCase().trim();
@@ -38,109 +38,116 @@ const normalizeCategory = (cat) => {
   return map[cat] || cat;
 };
 
-// Build a document strictly from what the row provides.
-// Only set a field if the cell exists; otherwise leave it out.
-function makeDocFromRow(row) {
-  const doc = {};
-  // Primary key to identify rows
-  const code = val(row["Code"]);
-  if (code) doc.code = code; // if your schema requires code, this must exist
-
-  // Map only known columns; don’t invent defaults
-  const closingQty = num(row["Closing Quantity"] ?? row["Closing Q"]);
-  if (closingQty !== undefined) doc.closingQty = closingQty;
-
-  const category = normalizeCategory(row["CATEGORY"]);
-  if (category !== undefined) doc.category = category;
-
-  const description = val(row["ITEM DESCRIPTION"]);
-  if (description !== undefined) doc.description = description;
-
-  const plantName = val(row["PLANT NAME"]);
-  if (plantName !== undefined) doc.plantName = plantName;
-
-  const weightSrc = row["WEIGHT"] ?? row["WEIGHT per sheet / pipe"];
-  const weight = num(weightSrc);
-  if (weight !== undefined) doc.weight = weight;
-
-  const unit = val(row["UC"] ?? row["UOM"]);
-  if (unit !== undefined) doc.unit = unit;
-
-  const stockTaken = val(row["stock taken qt"] ?? row["stock taken qty"]);
-  if (stockTaken !== undefined) doc.stockTaken = stockTaken;
-
-  const location = val(row["Location"]);
-  if (location !== undefined) doc.location = location;
-
-  const remarks = val(row["Remarks"] ?? row["REMARKS"] ?? row["remark"] ?? row["REMARK"]);
-  if (remarks !== undefined) doc.remarks = remarks;
-
-  const mainStoreQty = num(row["Main Store"]);
-  if (mainStoreQty !== undefined) doc.mainStoreQty = mainStoreQty;
-
-  const subStoreQty = num(row["Sub Store"]);
-  if (subStoreQty !== undefined) doc.subStoreQty = subStoreQty;
-
-  return doc;
+// case-insensitive getter across possible header variants
+function pick(row, keys) {
+  for (const k of keys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "")
+      return row[k];
+  }
+  // also try case-insensitive match
+  const lower = Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [k.toLowerCase(), v])
+  );
+  for (const k of keys.map((x) => x.toLowerCase())) {
+    if (lower[k] !== undefined && lower[k] !== null && String(lower[k]).trim() !== "")
+      return lower[k];
+  }
+  return undefined;
 }
 
-let importLock = false;
-
 router.post("/", upload.single("file"), async (req, res) => {
-  if (importLock) return res.status(409).json({ error: "Import already in progress." });
-  importLock = true;
-
   try {
     if (!req.file?.path) return res.status(400).json({ error: "No file uploaded" });
 
-    const wb = xlsx.readFile(req.file.path);
-    const sheet = wb.SheetNames[0];
-    const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheet], { defval: "" });
+    const wb = xlsx.readFile(req.file.path, { cellDates: true });
+    const sheetName = wb.SheetNames[0];
+    // raw:false => keep Excel's display text (helps preserve leading zeros)
+    const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], {
+      defval: "",
+      raw: false,
+    });
 
-    const seen = new Set();
-    const duplicates = [];
+    // Build docs: DO NOT SKIP any row
     const docs = [];
+    const seenCodes = new Map(); // count duplicates to tag them
 
-    for (const r of rows) {
-      const d = makeDocFromRow(r);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const excelRow = i + 2; // header is row 1
 
-      // If your schema requires 'code', skip rows without it
-      if (!d.code) continue;
-
-      if (seen.has(d.code)) {
-        duplicates.push(d.code);
-        continue;
+      // read fields (case-insensitive, multiple variants)
+      let code = val(pick(r, ["Code", "CODE", "code", "Item Code", "ITEM CODE"]));
+      // preserve leading zeros already via raw:false; still ensure string
+      if (code) {
+        const count = (seenCodes.get(code) || 0) + 1;
+        seenCodes.set(code, count);
+        if (count > 1) {
+          // duplicate code → keep both rows, make this one unique
+          code = `${code}__DUP-${count}`;
+        }
+      } else {
+        // missing code → generate one so insert never fails
+        code = `ROW-${excelRow}`;
       }
-      seen.add(d.code);
-      docs.push(d);
+
+      const doc = {
+        code,                                 // always present (original or generated)
+        codeGenerated: !val(pick(r, ["Code", "CODE", "code", "Item Code", "ITEM CODE"])),
+        excelRow,                             // provenance
+      };
+
+      const closingQty = num(pick(r, ["Closing Quantity", "Closing Q", "closing qty"]));
+      if (closingQty !== undefined) doc.closingQty = closingQty;
+
+      const category = normalizeCategory(pick(r, ["CATEGORY", "Category"]));
+      if (category !== undefined) doc.category = category;
+
+      const description = val(pick(r, ["ITEM DESCRIPTION", "Description", "Item Description"]));
+      if (description !== undefined) doc.description = description;
+
+      const plantName = val(pick(r, ["PLANT NAME", "Plant", "Plant Name"]));
+      if (plantName !== undefined) doc.plantName = plantName;
+
+      const weightSrc = pick(r, ["WEIGHT", "WEIGHT per sheet / pipe", "Weight"]);
+      const weight = num(weightSrc);
+      if (weight !== undefined) doc.weight = weight;
+
+      const unit = val(pick(r, ["UC", "UOM", "Unit"]));
+      if (unit !== undefined) doc.unit = unit;
+
+      const stockTaken = val(pick(r, ["stock taken qt", "stock taken qty", "Stock Taken"]));
+      if (stockTaken !== undefined) doc.stockTaken = stockTaken;
+
+      const location = val(pick(r, ["Location", "LOCATION"]));
+      if (location !== undefined) doc.location = location;
+
+      const remarks = val(pick(r, ["Remarks", "REMARKS", "remark", "REMARK"]));
+      if (remarks !== undefined) doc.remarks = remarks;
+
+      const mainStoreQty = num(pick(r, ["Main Store", "Main Store Qty"]));
+      if (mainStoreQty !== undefined) doc.mainStoreQty = mainStoreQty;
+
+      const subStoreQty = num(pick(r, ["Sub Store", "Sub Store Qty"]));
+      if (subStoreQty !== undefined) doc.subStoreQty = subStoreQty;
+
+      docs.push(doc);
     }
 
-    // 1) Replace/Upsert each row exactly as in Excel (no $set/$push — full replacement)
-    const ops = docs.map((d) => ({
-      replaceOne: {
-        filter: { code: d.code },
-        replacement: d,
-        upsert: true,
-      },
-    }));
-    if (ops.length) await Item.bulkWrite(ops, { ordered: false });
+    // Mirror mode: wipe and insert exactly what we parsed
+    await Item.deleteMany({});
+    const result = await Item.insertMany(docs, { ordered: true });
 
-    // 2) Remove anything not present in the file
-    await Item.deleteMany({ code: { $nin: Array.from(seen) } });
-
-    const total = await Item.countDocuments();
     res.json({
-      message: "✅ Mirror import complete. DB now matches the Excel file.",
-      insertedOrReplaced: docs.length,
-      removedNotInFile: true,
-      duplicateCodesSkipped: Array.from(new Set(duplicates)),
-      totalItems: total,
+      message: "✅ Imported exactly what was in the Excel (mirror mode).",
+      parsedRows: rows.length,
+      inserted: result.length,
+      note:
+        "Rows with missing/duplicate Code were still imported using generated codes (ROW-# or __DUP-n).",
     });
   } catch (err) {
     console.error("Import error:", err);
     res.status(500).json({ error: err.message });
   } finally {
-    importLock = false;
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
   }
 });
