@@ -85,12 +85,27 @@ exports.createIssueBill = async (req, res) => {
 // ✅ Get all issue bills
 exports.getIssueBills = async (req, res) => {
   try {
-    const bills = await IssueBill.find().populate("items.item");
+    const { itemCode, type } = req.query;
+
+    let query = {};
+    if (itemCode) {
+      const item = await Item.findOne({ code: itemCode });
+      if (item) {
+        query["items.item"] = item._id;
+      }
+    }
+    if (type) {
+      query.type = type;
+    }
+
+    const bills = await IssueBill.find(query).populate("items.item");
     res.status(200).json(bills);
   } catch (error) {
+    console.error("Error fetching issue bills:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
+
 
 // ✅ Get bill by ID
 exports.getIssueBillById = async (req, res) => {
