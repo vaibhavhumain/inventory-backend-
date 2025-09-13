@@ -37,10 +37,11 @@ exports.createIssueBill = async (req, res) => {
       const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
       dbItem.closingQty = closingQty;
 
+      // 🔹 Correct in/out logic
       dbItem.dailyStock.push({
         date: new Date(),
-        in: type === 'MAIN_TO_SUB' ? it.quantity : 0,
-        out: type === 'SUB_TO_USER' ? it.quantity : 0,
+        in: 0,
+        out: it.quantity,
         closingQty,
         mainStoreQty: dbItem.mainStoreQty,
         subStoreQty: dbItem.subStoreQty,
@@ -119,7 +120,7 @@ exports.updateIssueBill = async (req, res) => {
     const oldBill = await IssueBill.findById(id);
     if (!oldBill) return res.status(404).json({ error: "Issue Bill not found" });
 
-    // Reverse stock for old items
+    // 🔹 Reverse old stock
     for (const it of oldBill.items) {
       const dbItem = await Item.findById(it.item);
       if (!dbItem) continue;
@@ -136,7 +137,7 @@ exports.updateIssueBill = async (req, res) => {
 
       dbItem.dailyStock.push({
         date: new Date(),
-        in: it.quantity, // Reversed back in
+        in: it.quantity,
         out: 0,
         closingQty,
         mainStoreQty: dbItem.mainStoreQty,
@@ -146,7 +147,7 @@ exports.updateIssueBill = async (req, res) => {
       await dbItem.save();
     }
 
-    // Apply new items
+    // 🔹 Apply new items
     let totalAmount = 0;
     const processedItems = [];
 
@@ -172,8 +173,8 @@ exports.updateIssueBill = async (req, res) => {
 
       dbItem.dailyStock.push({
         date: new Date(),
-        in: type === 'MAIN_TO_SUB' ? it.quantity : 0,
-        out: type === 'SUB_TO_USER' ? it.quantity : 0,
+        in: 0,
+        out: it.quantity,
         closingQty,
         mainStoreQty: dbItem.mainStoreQty,
         subStoreQty: dbItem.subStoreQty,
@@ -230,7 +231,7 @@ exports.deleteIssueBill = async (req, res) => {
 
       dbItem.dailyStock.push({
         date: new Date(),
-        in: it.quantity, 
+        in: it.quantity,
         out: 0,
         closingQty,
         mainStoreQty: dbItem.mainStoreQty,
