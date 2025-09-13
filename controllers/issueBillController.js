@@ -4,9 +4,9 @@ const Item = require('../models/item');
 // ✅ Create Issue Bill
 exports.createIssueBill = async (req, res) => {
   try {
-    const { issueNo, issueDate, department, items, issuedBy, type, issuedTo } = req.body;
+    const { issueDate, department, items, issuedBy, type, issuedTo } = req.body;
 
-    if (!issueNo || !department || !items || items.length === 0 || !type) {
+    if (!department || !items || items.length === 0 || !type) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -63,7 +63,6 @@ exports.createIssueBill = async (req, res) => {
     }
 
     const newBill = new IssueBill({
-      issueNo,
       issueDate,
       department,
       type,

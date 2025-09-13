@@ -8,7 +8,6 @@ const billItemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const issueBillSchema = new mongoose.Schema({
-  issueNo: { type: String, required: true, unique: true },
   issueDate: { type: Date, default: Date.now },
   department: { type: String, required: true },
 
