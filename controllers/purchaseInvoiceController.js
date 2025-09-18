@@ -1,4 +1,5 @@
 const PurchaseInvoice = require('../models/purchaseInvoice');
+const XLSX = require('xlsx');
 
 exports.createPurchaseInvoice = async (req, res) => {
   try {
@@ -103,6 +104,50 @@ exports.deletePurchaseInvoice = async (req, res) => {
     res.status(200).json({ message: 'Purchase Invoice Deleted' });
   } catch (error) {
     console.error('Error deleting invoice:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Generate report (JSON or Excel)
+exports.getInvoiceReport = async (req, res) => {
+  try {
+    const { from, to, format } = req.query;
+
+    const match = {};
+    if (from && to) {
+      match.date = { $gte: new Date(from), $lte: new Date(to) };
+    }
+
+    const invoices = await PurchaseInvoice.find(match).sort({ date: 1 });
+
+    const summary = {
+      totalInvoices: invoices.length,
+      totalTaxableValue: invoices.reduce((sum, inv) => sum + (inv.totalTaxableValue || 0), 0),
+      totalInvoiceValue: invoices.reduce((sum, inv) => sum + (inv.totalInvoiceValue || 0), 0),
+    };
+
+    if (format === 'excel') {
+      const data = invoices.map(inv => ({
+        InvoiceNumber: inv.invoiceNumber,
+        Date: inv.date.toISOString().split('T')[0],
+        PartyName: inv.partyName,
+        TotalTaxableValue: inv.totalTaxableValue,
+        TotalInvoiceValue: inv.totalInvoiceValue
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Disposition', 'attachment; filename=InvoiceReport.xlsx');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      return res.send(buffer);
+    }
+
+    res.status(200).json({ summary, invoices });
+  } catch (error) {
+    console.error('Error generating report:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };

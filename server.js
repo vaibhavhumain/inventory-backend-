@@ -18,7 +18,8 @@ const app = express();
 app.use(cors({
   origin: [
     "https://invetrack.netlify.app",  
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "http://192.168.1.12:3000"
   ],
   credentials: true
 }));
