@@ -28,7 +28,7 @@ app.use(express.json());
 
 app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/purchase-bills', purchaseBillInvoice);
+app.use('/api/purchase-invoices', purchaseBillInvoice);
 app.use('/api/stock', stockRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/import', importRoutes);
