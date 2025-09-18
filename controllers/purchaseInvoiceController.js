@@ -3,7 +3,15 @@ const XLSX = require('xlsx');
 
 exports.createPurchaseInvoice = async (req, res) => {
   try {
-    const { invoiceNumber, date, partyName, items, otherChargesBeforeTax, otherChargesAfterTax } = req.body;
+    const { 
+      invoiceNumber, 
+      date, 
+      partyName, 
+      items, 
+      otherChargesBeforeTaxAmount,   // fixed ₹
+      otherChargesBeforeTaxPercent,  // %
+      otherChargesAfterTax 
+    } = req.body;
 
     if (!invoiceNumber || !partyName || !items || items.length === 0) {
       return res.status(400).json({ error: 'Invoice number, party name and at least one item are required' });
@@ -36,9 +44,15 @@ exports.createPurchaseInvoice = async (req, res) => {
       });
     }
 
+    // 🔹 Calculate before-tax charges
+    const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
+    const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
+
+    // 🔹 Add to totals
     const totalInvoiceValue =
       totalTaxableValue +
-      (otherChargesBeforeTax || 0) +
+      beforeTaxTotal +
       gstTotal +
       (otherChargesAfterTax || 0);
 
@@ -47,9 +61,10 @@ exports.createPurchaseInvoice = async (req, res) => {
       date: date || new Date(),
       partyName,
       items: processedItems,
-      otherChargesBeforeTax: otherChargesBeforeTax || 0,
+      otherChargesBeforeTaxAmount: beforeTaxFixedValue,
+      otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
       otherChargesAfterTax: otherChargesAfterTax || 0,
-      totalTaxableValue,
+      totalTaxableValue: totalTaxableValue + beforeTaxTotal,
       totalInvoiceValue
     });
 
