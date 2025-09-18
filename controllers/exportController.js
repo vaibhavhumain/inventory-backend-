@@ -1,7 +1,7 @@
 const ExcelJS = require("exceljs");
 const Item = require("../models/item");
 const IssueBill = require("../models/issueBill");
-const PurchaseBill = require("../models/purchaseBill");
+const PurchaseBill = require("../models/purchaseInvoice");
 
 const IST = "Asia/Kolkata";
 const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });

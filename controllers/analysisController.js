@@ -1,6 +1,6 @@
 // controllers/analysisController.js
 const Item = require('../models/item');
-const PurchaseBill = require('../models/purchaseBill');
+const PurchaseBill = require('../models/purchaseInvoice');
 const IssueBill = require('../models/issueBill');
 
 exports.getStockValue = async (req, res) => {

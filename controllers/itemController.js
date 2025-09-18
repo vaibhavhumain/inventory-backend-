@@ -1,5 +1,5 @@
 const Item = require('../models/item');
-const PurchaseBill = require('../models/purchaseBill');
+const PurchaseBill = require('../models/purchaseInvoice');
 const categoryPrefixes = {
   "raw material": "RM",
   "consumables": "CON",
