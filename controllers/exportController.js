@@ -129,7 +129,6 @@ exports.exportData = async (req, res) => {
     // === ISSUE BILLS ===
     const issueSheet = workbook.addWorksheet("Issue Bills");
     issueSheet.columns = [
-      { header: "Issue No", key: "issueNo", width: 16 },
       { header: "Department", key: "department", width: 20 },
       { header: "Issued By", key: "issuedBy", width: 22 },
       { header: "Created At", key: "createdAt", width: 22 },
@@ -137,7 +136,6 @@ exports.exportData = async (req, res) => {
     ];
     issueBills.forEach((b) => {
       issueSheet.addRow({
-        issueNo: b.issueNo,
         department: b.department,
         issuedBy: b.issuedBy,
         createdAt: b.createdAt ? fmt(b.createdAt) : "",
