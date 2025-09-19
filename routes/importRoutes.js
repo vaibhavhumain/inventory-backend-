@@ -10,10 +10,11 @@ const upload = multer({ dest: "uploads/" });
 // helpers
 const val = (v) =>
   v === null || v === undefined ? "" : String(v).trim();
+
 const num = (v) => {
-  if (v === null || v === undefined || v === "") return undefined;
+  if (v === null || v === undefined || v === "") return "";
   const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+  return Number.isFinite(n) ? n : v; // keep original if not numeric
 };
 
 router.post("/", upload.single("file"), async (req, res) => {
@@ -24,13 +25,13 @@ router.post("/", upload.single("file"), async (req, res) => {
     const wb = xlsx.readFile(req.file.path, { cellDates: true });
     const sheetName = wb.SheetNames[0];
     const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], {
-      defval: "",
-      raw: false,
+      defval: "", // preserve empty cells as ""
+      raw: false, // use formatted values
     });
 
     const today = new Date();
     const docs = rows.map((r, i) => {
-      // fallback code if missing
+      // use Excel code directly (or fallback only if Excel missing it)
       const code = val(r["Code"]) || `ROW-${i + 2}`;
 
       const category = val(r["CATEGORY"]);
@@ -81,11 +82,11 @@ router.post("/", upload.single("file"), async (req, res) => {
         dailyStock: [
           {
             date: today,
-            in: closingQty || 0,
+            in: closingQty && !isNaN(closingQty) ? closingQty : 0,
             out: 0,
-            closingQty: closingQty || 0,
-            mainStoreQty: mainStoreQty || 0,
-            subStoreQty: subStoreQty || 0,
+            closingQty: closingQty || "",
+            mainStoreQty: mainStoreQty || "",
+            subStoreQty: subStoreQty || "",
           },
         ],
       };
@@ -95,7 +96,7 @@ router.post("/", upload.single("file"), async (req, res) => {
     const result = await Item.insertMany(docs, { ordered: true });
 
     res.json({
-      message: "✅ Excel imported & mapped successfully",
+      message: "✅ Excel imported exactly as provided",
       parsedRows: rows.length,
       inserted: result.length,
     });
