@@ -17,9 +17,6 @@ router.post('/', createItem);
 router.post('/bulk-update', bulkUpdateItems);
 router.post('/:code/suppliers',addSupplierToItem);
 router.get('/', getItems);
-
-// 🟢 use :code instead of :id
-router.get('/:code/history', getItemHistory);
 router.get('/:code', getItemByCode);
 router.put('/:code', updateItemByCode);
 router.delete("/:code", protect, authorize("developer"), deleteItemByCode);
