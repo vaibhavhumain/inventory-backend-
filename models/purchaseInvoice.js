@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const vendorSchema = require('./vendor');
 const invoiceItemSchema = new mongoose.Schema({
   item: { type: String, required: true },
   description: { type: String },
@@ -17,6 +17,8 @@ const invoiceItemSchema = new mongoose.Schema({
 const purchaseInvoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
+  vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
+
   partyName: { type: String, required: true },
   items: [invoiceItemSchema],
 
