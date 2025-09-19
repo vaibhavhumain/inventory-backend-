@@ -72,66 +72,62 @@ router.post("/", upload.single("file"), async (req, res) => {
     const seenCodes = new Map(); // count duplicates to tag them
 
     for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      const excelRow = i + 2; // header is row 1
+  const r = rows[i];
+  const excelRow = i + 2;
 
-      // read fields (case-insensitive, multiple variants)
-      let code = val(pick(r, ["Code", "CODE", "code", "Item Code", "ITEM CODE"]));
-      // preserve leading zeros already via raw:false; still ensure string
-      if (code) {
-        const count = (seenCodes.get(code) || 0) + 1;
-        seenCodes.set(code, count);
-        if (count > 1) {
-          // duplicate code → keep both rows, make this one unique
-          code = `${code}__DUP-${count}`;
-        }
-      } else {
-        // missing code → generate one so insert never fails
-        code = `ROW-${excelRow}`;
-      }
+  let code = val(pick(r, ["Code", "CODE", "code", "Item Code", "ITEM CODE"]));
+  if (code) {
+    const count = (seenCodes.get(code) || 0) + 1;
+    seenCodes.set(code, count);
+    if (count > 1) code = `${code}__DUP-${count}`;
+  } else {
+    code = `ROW-${excelRow}`;
+  }
 
-      const doc = {
-        code,                                 // always present (original or generated)
-        codeGenerated: !val(pick(r, ["Code", "CODE", "code", "Item Code", "ITEM CODE"])),
-        excelRow,                             // provenance
-      };
+  const closingQty = num(pick(r, ["Closing Quantity", "Closing Q", "closing qty"])) ?? 0;
+  const mainStoreQty = num(pick(r, ["Main Store", "Main Store Qty"])) ?? 0;
+  const subStoreQty = num(pick(r, ["Sub Store", "Sub Store Qty"])) ?? 0;
 
-      const closingQty = num(pick(r, ["Closing Quantity", "Closing Q", "closing qty"]));
-      if (closingQty !== undefined) doc.closingQty = closingQty;
+  const category = normalizeCategory(pick(r, ["CATEGORY", "Category"]));
+  const description = val(pick(r, ["ITEM DESCRIPTION", "Description", "Item Description"]));
+  const plantName = val(pick(r, ["PLANT NAME", "Plant", "Plant Name"]));
+  const weight = num(pick(r, ["WEIGHT", "WEIGHT per sheet / pipe", "Weight"]));
+  const unit = val(pick(r, ["UC", "UOM", "Unit"]));
+  const stockTaken = val(pick(r, ["stock taken qt", "stock taken qty", "Stock Taken"]));
+  const location = val(pick(r, ["Location", "LOCATION"]));
+  const remarks = val(pick(r, ["Remarks", "REMARKS", "remark", "REMARK"]));
 
-      const category = normalizeCategory(pick(r, ["CATEGORY", "Category"]));
-      if (category !== undefined) doc.category = category;
+  const today = new Date();
 
-      const description = val(pick(r, ["ITEM DESCRIPTION", "Description", "Item Description"]));
-      if (description !== undefined) doc.description = description;
+  const doc = {
+    code,
+    excelRow,
+    category,
+    description,
+    plantName,
+    weight,
+    unit,
+    stockTaken,
+    location,
+    remarks,
+    closingQty,      
+    mainStoreQty,
+    subStoreQty,
+    dailyStock: [
+      {
+        date: today,
+        in: closingQty,
+        out: 0,
+        closingQty,
+        mainStoreQty,
+        subStoreQty,
+      },
+    ],
+  };
 
-      const plantName = val(pick(r, ["PLANT NAME", "Plant", "Plant Name"]));
-      if (plantName !== undefined) doc.plantName = plantName;
+  docs.push(doc);
+}
 
-      const weightSrc = pick(r, ["WEIGHT", "WEIGHT per sheet / pipe", "Weight"]);
-      const weight = num(weightSrc);
-      if (weight !== undefined) doc.weight = weight;
-
-      const unit = val(pick(r, ["UC", "UOM", "Unit"]));
-      if (unit !== undefined) doc.unit = unit;
-
-      const stockTaken = val(pick(r, ["stock taken qt", "stock taken qty", "Stock Taken"]));
-      if (stockTaken !== undefined) doc.stockTaken = stockTaken;
-
-      const location = val(pick(r, ["Location", "LOCATION"]));
-      if (location !== undefined) doc.location = location;
-
-      const remarks = val(pick(r, ["Remarks", "REMARKS", "remark", "REMARK"]));
-      if (remarks !== undefined) doc.remarks = remarks;
-
-      const mainStoreQty = num(pick(r, ["Main Store", "Main Store Qty"]));
-      if (mainStoreQty !== undefined) doc.mainStoreQty = mainStoreQty;
-
-      const subStoreQty = num(pick(r, ["Sub Store", "Sub Store Qty"]));
-      if (subStoreQty !== undefined) doc.subStoreQty = subStoreQty;
-
-      docs.push(doc);
-    }
 
     // Mirror mode: wipe and insert exactly what we parsed
     await Item.deleteMany({});
