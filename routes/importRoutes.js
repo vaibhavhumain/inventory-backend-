@@ -7,9 +7,14 @@ const Item = require("../models/item");
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 
-// helper to trim values
+// helpers
 const val = (v) =>
   v === null || v === undefined ? "" : String(v).trim();
+const num = (v) => {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
 
 router.post("/", upload.single("file"), async (req, res) => {
   try {
@@ -18,23 +23,81 @@ router.post("/", upload.single("file"), async (req, res) => {
 
     const wb = xlsx.readFile(req.file.path, { cellDates: true });
     const sheetName = wb.SheetNames[0];
-    // keep values as strings (so leading zeros are preserved)
     const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], {
       defval: "",
       raw: false,
     });
 
-    // ⚠️ delete all items before inserting (mirror mode)
-    await Item.deleteMany({});
+    const today = new Date();
+    const docs = rows.map((r, i) => {
+      // fallback code if missing
+      const code = val(r["Code"]) || `ROW-${i + 2}`;
 
-    // insert rows exactly as they appear
-    const result = await Item.insertMany(rows, { ordered: false });
+      const category = val(r["CATEGORY"]);
+      const description = val(r["ITEM DESCRIPTION"]);
+      const plantName = val(r["PLANT NAME"]);
+      const weight = num(r["WEIGHT per sheet / pipe"]);
+      const unit = val(r["UOM"]);
+      const closingQty = num(r["Closing Quantity"] || r["Closing Quan"]);
+      const mainStoreQty = num(r["Main Store"]);
+      const subStoreQty = num(r["Sub Store"]);
+      const stockTaken = val(r["stock taken d"]);
+      const location = val(r["Location"]);
+      const remarks = val(r["Remarks"]);
+
+      const suppliers = [];
+      if (r["Supplier 1 Name"] && r["Supplier 1 Amount"]) {
+        suppliers.push({
+          name: val(r["Supplier 1 Name"]),
+          amount: num(r["Supplier 1 Amount"]),
+        });
+      }
+      if (r["Supplier 2 Name"] && r["Supplier 2 Amount"]) {
+        suppliers.push({
+          name: val(r["Supplier 2 Name"]),
+          amount: num(r["Supplier 2 Amount"]),
+        });
+      }
+
+      return {
+        code,
+        category,
+        description,
+        plantName,
+        weight,
+        unit,
+        closingQty,
+        mainStoreQty,
+        subStoreQty,
+        stockTaken,
+        location,
+        remarks,
+        suppliers,
+        supplierHistory: suppliers.map((s) => ({
+          supplierName: s.name,
+          amount: s.amount,
+          date: today,
+        })),
+        dailyStock: [
+          {
+            date: today,
+            in: closingQty || 0,
+            out: 0,
+            closingQty: closingQty || 0,
+            mainStoreQty: mainStoreQty || 0,
+            subStoreQty: subStoreQty || 0,
+          },
+        ],
+      };
+    });
+
+    await Item.deleteMany({});
+    const result = await Item.insertMany(docs, { ordered: true });
 
     res.json({
-      message: "✅ Imported Excel as-is (mirror mode).",
+      message: "✅ Excel imported & mapped successfully",
       parsedRows: rows.length,
       inserted: result.length,
-      note: "No cleaning or auto-generation was done. Data is stored exactly like Excel.",
     });
   } catch (err) {
     console.error("Import error:", err);
