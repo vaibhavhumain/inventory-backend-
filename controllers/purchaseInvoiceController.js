@@ -1,20 +1,24 @@
 const PurchaseInvoice = require('../models/purchaseInvoice');
-const Item = require('../models/item');   // ✅ add this
+const Item = require('../models/item');
 const XLSX = require('xlsx');
 
+// Create purchase invoice
 exports.createPurchaseInvoice = async (req, res) => {
   try {
-    const { 
-      invoiceNumber, 
-      date, 
-      partyName, 
-      items, 
-      otherChargesBeforeTaxAmount,   
-      otherChargesBeforeTaxPercent,  
+    const {
+      invoiceNumber,
+      date,
+      partyName,
+      items,
+      otherChargesBeforeTaxAmount,
+      otherChargesBeforeTaxPercent,
+      otherChargesAfterTax,         // ✅ FIX: now included
     } = req.body;
 
     if (!invoiceNumber || !partyName || !items || items.length === 0) {
-      return res.status(400).json({ error: 'Invoice number, party name and at least one item are required' });
+      return res.status(400).json({
+        error: 'Invoice number, party name and at least one item are required',
+      });
     }
 
     let totalTaxableValue = 0;
@@ -40,16 +44,16 @@ exports.createPurchaseInvoice = async (req, res) => {
         rate: it.rate,
         amount,
         gstRate: it.gstRate,
-        notes: it.notes
+        notes: it.notes,
       });
 
       // 🔹 Sync with Item collection
       let existing = await Item.findOne({ code: it.item });
 
       if (existing) {
-        // Update stock only
         existing.closingQty = (existing.closingQty || 0) + (it.subQuantity || 0);
-        existing.mainStoreQty = (existing.mainStoreQty || 0) + (it.subQuantity || 0);
+        existing.mainStoreQty =
+          (existing.mainStoreQty || 0) + (it.subQuantity || 0);
 
         existing.dailyStock.push({
           date: new Date(),
@@ -62,11 +66,10 @@ exports.createPurchaseInvoice = async (req, res) => {
 
         await existing.save();
       } else {
-        // Create new item only first time
         const newItem = new Item({
           code: it.item,
           description: it.description,
-          category: it.hsnCode,  // you can adjust if HSN ≠ Category
+          category: it.hsnCode,
           unit: it.subQuantityMeasurement,
           closingQty: it.subQuantity,
           mainStoreQty: it.subQuantity,
@@ -88,7 +91,8 @@ exports.createPurchaseInvoice = async (req, res) => {
     }
 
     // 🔹 Calculate before-tax charges
-    const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    const beforeTaxPercentValue =
+      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
 
@@ -108,11 +112,14 @@ exports.createPurchaseInvoice = async (req, res) => {
       otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
       otherChargesAfterTax: otherChargesAfterTax || 0,
       totalTaxableValue: totalTaxableValue + beforeTaxTotal,
-      totalInvoiceValue
+      totalInvoiceValue,
     });
 
     await newInvoice.save();
-    res.status(201).json({ message: 'Purchase Invoice Added Successfully', invoice: newInvoice });
+    res.status(201).json({
+      message: 'Purchase Invoice Added Successfully',
+      invoice: newInvoice,
+    });
   } catch (error) {
     console.error('Error adding purchase invoice:', error);
     res.status(500).json({ error: 'Server error' });
@@ -145,9 +152,16 @@ exports.getPurchaseInvoiceById = async (req, res) => {
 // Update invoice
 exports.updatePurchaseInvoice = async (req, res) => {
   try {
-    const updatedInvoice = await PurchaseInvoice.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!updatedInvoice) return res.status(404).json({ error: 'Invoice not found' });
-    res.status(200).json({ message: 'Purchase Invoice Updated', invoice: updatedInvoice });
+    const updatedInvoice = await PurchaseInvoice.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true }
+    );
+    if (!updatedInvoice)
+      return res.status(404).json({ error: 'Invoice not found' });
+    res
+      .status(200)
+      .json({ message: 'Purchase Invoice Updated', invoice: updatedInvoice });
   } catch (error) {
     console.error('Error updating invoice:', error);
     res.status(500).json({ error: 'Server error' });
@@ -157,8 +171,11 @@ exports.updatePurchaseInvoice = async (req, res) => {
 // Delete invoice
 exports.deletePurchaseInvoice = async (req, res) => {
   try {
-    const deletedInvoice = await PurchaseInvoice.findByIdAndDelete(req.params.id);
-    if (!deletedInvoice) return res.status(404).json({ error: 'Invoice not found' });
+    const deletedInvoice = await PurchaseInvoice.findByIdAndDelete(
+      req.params.id
+    );
+    if (!deletedInvoice)
+      return res.status(404).json({ error: 'Invoice not found' });
     res.status(200).json({ message: 'Purchase Invoice Deleted' });
   } catch (error) {
     console.error('Error deleting invoice:', error);
@@ -180,17 +197,23 @@ exports.getInvoiceReport = async (req, res) => {
 
     const summary = {
       totalInvoices: invoices.length,
-      totalTaxableValue: invoices.reduce((sum, inv) => sum + (inv.totalTaxableValue || 0), 0),
-      totalInvoiceValue: invoices.reduce((sum, inv) => sum + (inv.totalInvoiceValue || 0), 0),
+      totalTaxableValue: invoices.reduce(
+        (sum, inv) => sum + (inv.totalTaxableValue || 0),
+        0
+      ),
+      totalInvoiceValue: invoices.reduce(
+        (sum, inv) => sum + (inv.totalInvoiceValue || 0),
+        0
+      ),
     };
 
     if (format === 'excel') {
-      const data = invoices.map(inv => ({
+      const data = invoices.map((inv) => ({
         InvoiceNumber: inv.invoiceNumber,
         Date: inv.date.toISOString().split('T')[0],
         PartyName: inv.partyName,
         TotalTaxableValue: inv.totalTaxableValue,
-        TotalInvoiceValue: inv.totalInvoiceValue
+        TotalInvoiceValue: inv.totalInvoiceValue,
       }));
 
       const ws = XLSX.utils.json_to_sheet(data);
@@ -198,8 +221,14 @@ exports.getInvoiceReport = async (req, res) => {
       XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
       const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-      res.setHeader('Content-Disposition', 'attachment; filename=InvoiceReport.xlsx');
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename=InvoiceReport.xlsx'
+      );
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
       return res.send(buffer);
     }
 
@@ -210,19 +239,17 @@ exports.getInvoiceReport = async (req, res) => {
   }
 };
 
-
 // Get item history (from purchase invoices)
 exports.getItemHistoryFromInvoices = async (req, res) => {
   try {
     const code = req.params.code;
 
-    // Find invoices that contain this item
-    const invoices = await PurchaseInvoice.find({ "items.item": code }).sort({
+    const invoices = await PurchaseInvoice.find({ 'items.item': code }).sort({
       date: -1,
     });
 
     if (!invoices.length) {
-      return res.status(404).json({ error: "No history found for this item" });
+      return res.status(404).json({ error: 'No history found for this item' });
     }
 
     const supplierHistory = invoices.flatMap((inv) =>
@@ -259,7 +286,7 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
       stock: stockHistory,
     });
   } catch (error) {
-    console.error("Error fetching item history:", error);
-    res.status(500).json({ error: "Server error" });
+    console.error('Error fetching item history:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 };
