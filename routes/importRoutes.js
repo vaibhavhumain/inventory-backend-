@@ -38,13 +38,11 @@ const normalizeCategory = (cat) => {
   return map[cat] || cat;
 };
 
-// case-insensitive getter across possible header variants
 function pick(row, keys) {
   for (const k of keys) {
     if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "")
       return row[k];
   }
-  // also try case-insensitive match
   const lower = Object.fromEntries(
     Object.entries(row).map(([k, v]) => [k.toLowerCase(), v])
   );
@@ -61,15 +59,13 @@ router.post("/", upload.single("file"), async (req, res) => {
 
     const wb = xlsx.readFile(req.file.path, { cellDates: true });
     const sheetName = wb.SheetNames[0];
-    // raw:false => keep Excel's display text (helps preserve leading zeros)
     const rows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], {
       defval: "",
       raw: false,
     });
 
-    // Build docs: DO NOT SKIP any row
     const docs = [];
-    const seenCodes = new Map(); // count duplicates to tag them
+    const seenCodes = new Map(); 
 
     for (let i = 0; i < rows.length; i++) {
   const r = rows[i];
@@ -84,9 +80,9 @@ router.post("/", upload.single("file"), async (req, res) => {
     code = `ROW-${excelRow}`;
   }
 
-  const closingQty = num(pick(r, ["Closing Quantity", "Closing Q", "closing qty"])) ?? 0;
-  const mainStoreQty = num(pick(r, ["Main Store", "Main Store Qty"])) ?? 0;
-  const subStoreQty = num(pick(r, ["Sub Store", "Sub Store Qty"])) ?? 0;
+  const closingQty = num(pick(r, ["Closing Quantity", "Closing Q", "closing qty"]));
+  const mainStoreQty = num(pick(r, ["Main Store", "Main Store Qty"]));
+  const subStoreQty = num(pick(r, ["Sub Store", "Sub Store Qty"]));
 
   const category = normalizeCategory(pick(r, ["CATEGORY", "Category"]));
   const description = val(pick(r, ["ITEM DESCRIPTION", "Description", "Item Description"]));
@@ -100,30 +96,30 @@ router.post("/", upload.single("file"), async (req, res) => {
   const today = new Date();
 
   const doc = {
-    code,
-    excelRow,
-    category,
-    description,
-    plantName,
-    weight,
-    unit,
-    stockTaken,
-    location,
-    remarks,
-    closingQty,      
-    mainStoreQty,
-    subStoreQty,
-    dailyStock: [
-      {
-        date: today,
-        in: closingQty,
-        out: 0,
-        closingQty,
-        mainStoreQty,
-        subStoreQty,
-      },
-    ],
-  };
+  code,
+  excelRow,
+  category,
+  description,
+  plantName,
+  weight,
+  unit,
+  stockTaken,
+  location,
+  remarks,
+  closingQty,
+  mainStoreQty,
+  subStoreQty,
+  dailyStock: [
+    {
+      date: today,
+      in: closingQty ?? 0,
+      out: 0,
+      closingQty: closingQty ?? 0,
+      mainStoreQty: mainStoreQty ?? 0,
+      subStoreQty: subStoreQty ?? 0,
+    },
+  ],
+};
 
   docs.push(doc);
 }
