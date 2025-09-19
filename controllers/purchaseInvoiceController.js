@@ -209,3 +209,57 @@ exports.getInvoiceReport = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+
+// Get item history (from purchase invoices)
+exports.getItemHistoryFromInvoices = async (req, res) => {
+  try {
+    const code = req.params.code;
+
+    // Find invoices that contain this item
+    const invoices = await PurchaseInvoice.find({ "items.item": code }).sort({
+      date: -1,
+    });
+
+    if (!invoices.length) {
+      return res.status(404).json({ error: "No history found for this item" });
+    }
+
+    const supplierHistory = invoices.flatMap((inv) =>
+      inv.items
+        .filter((it) => it.item === code)
+        .map((it) => ({
+          date: inv.date,
+          invoiceNumber: inv.invoiceNumber,
+          supplierName: inv.partyName,
+          description: it.description,
+          hsnCode: it.hsnCode,
+          quantity: it.subQuantity,
+          rate: it.rate,
+          amount: it.amount,
+          gstRate: it.gstRate,
+        }))
+    );
+
+    let closingQty = 0;
+    const stockHistory = supplierHistory
+      .map((s) => {
+        closingQty += s.quantity || 0;
+        return {
+          date: s.date,
+          in: s.quantity || 0,
+          out: 0,
+          closingQty,
+        };
+      })
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.json({
+      supplierHistory,
+      stock: stockHistory,
+    });
+  } catch (error) {
+    console.error("Error fetching item history:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
