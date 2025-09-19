@@ -1,23 +1,20 @@
-const PurchaseInvoice = require("../models/purchaseInvoice");
-const Item = require("../models/item");   // 🔹 import Item model
-const XLSX = require("xlsx");
+const PurchaseInvoice = require('../models/purchaseInvoice');
+const Item = require('../models/item');   // ✅ add this
+const XLSX = require('xlsx');
 
 exports.createPurchaseInvoice = async (req, res) => {
   try {
-    const {
-      invoiceNumber,
-      date,
-      partyName,
-      items,
-      otherChargesBeforeTaxAmount, // fixed ₹
-      otherChargesBeforeTaxPercent, // %
-      otherChargesAfterTax,
+    const { 
+      invoiceNumber, 
+      date, 
+      partyName, 
+      items, 
+      otherChargesBeforeTaxAmount,   
+      otherChargesBeforeTaxPercent,  
     } = req.body;
 
     if (!invoiceNumber || !partyName || !items || items.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "Invoice number, party name and at least one item are required" });
+      return res.status(400).json({ error: 'Invoice number, party name and at least one item are required' });
     }
 
     let totalTaxableValue = 0;
@@ -43,14 +40,14 @@ exports.createPurchaseInvoice = async (req, res) => {
         rate: it.rate,
         amount,
         gstRate: it.gstRate,
-        notes: it.notes,
+        notes: it.notes
       });
 
-      // 🔹 Sync with Items collection
+      // 🔹 Sync with Item collection
       let existing = await Item.findOne({ code: it.item });
 
       if (existing) {
-        // update stock
+        // Update stock only
         existing.closingQty = (existing.closingQty || 0) + (it.subQuantity || 0);
         existing.mainStoreQty = (existing.mainStoreQty || 0) + (it.subQuantity || 0);
 
@@ -65,11 +62,11 @@ exports.createPurchaseInvoice = async (req, res) => {
 
         await existing.save();
       } else {
-        // create new item if not exists
+        // Create new item only first time
         const newItem = new Item({
           code: it.item,
           description: it.description,
-          category: it.hsnCode,
+          category: it.hsnCode,  // you can adjust if HSN ≠ Category
           unit: it.subQuantityMeasurement,
           closingQty: it.subQuantity,
           mainStoreQty: it.subQuantity,
@@ -91,14 +88,16 @@ exports.createPurchaseInvoice = async (req, res) => {
     }
 
     // 🔹 Calculate before-tax charges
-    const beforeTaxPercentValue =
-      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
 
     // 🔹 Add to totals
     const totalInvoiceValue =
-      totalTaxableValue + beforeTaxTotal + gstTotal + (otherChargesAfterTax || 0);
+      totalTaxableValue +
+      beforeTaxTotal +
+      gstTotal +
+      (otherChargesAfterTax || 0);
 
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
@@ -109,20 +108,16 @@ exports.createPurchaseInvoice = async (req, res) => {
       otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
       otherChargesAfterTax: otherChargesAfterTax || 0,
       totalTaxableValue: totalTaxableValue + beforeTaxTotal,
-      totalInvoiceValue,
+      totalInvoiceValue
     });
 
     await newInvoice.save();
-
-    res
-      .status(201)
-      .json({ message: "Purchase Invoice Added Successfully", invoice: newInvoice });
+    res.status(201).json({ message: 'Purchase Invoice Added Successfully', invoice: newInvoice });
   } catch (error) {
-    console.error("Error adding purchase invoice:", error);
-    res.status(500).json({ error: "Server error" });
+    console.error('Error adding purchase invoice:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 };
-
 
 // Get all invoices
 exports.getPurchaseInvoices = async (req, res) => {
