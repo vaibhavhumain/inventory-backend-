@@ -3,8 +3,15 @@ const Vendor = require('../models/vendor');
 // Create Vendor
 exports.createVendor = async (req, res) => {
   try {
-    const vendor = new Vendor(req.body);
+    const { code, name, address, state, gstNumber } = req.body;
+
+    if (!code || !name) {
+      return res.status(400).json({ error: "Vendor code and name are required" });
+    }
+
+    const vendor = new Vendor({ code, name, address, state, gstNumber });
     await vendor.save();
+
     res.status(201).json(vendor);
   } catch (err) {
     console.error("Error creating vendor:", err);
@@ -38,7 +45,14 @@ exports.getVendorById = async (req, res) => {
 // Update vendor
 exports.updateVendor = async (req, res) => {
   try {
-    const vendor = await Vendor.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { code, name, address, state, gstNumber } = req.body;
+
+    const vendor = await Vendor.findByIdAndUpdate(
+      req.params.id,
+      { code, name, address, state, gstNumber },
+      { new: true, runValidators: true }
+    );
+
     if (!vendor) return res.status(404).json({ error: "Vendor not found" });
     res.json({ message: "Vendor updated successfully", vendor });
   } catch (err) {
