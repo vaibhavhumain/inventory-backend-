@@ -9,15 +9,17 @@ exports.createPurchaseInvoice = async (req, res) => {
       invoiceNumber,
       date,
       partyName,
+      vendor, // ✅ include vendor
       items,
       otherChargesBeforeTaxAmount,
       otherChargesBeforeTaxPercent,
-      otherChargesAfterTax,         // ✅ FIX: now included
+      otherChargesBeforeTaxGstRate, // ✅ include GST rate
+      otherChargesAfterTax,
     } = req.body;
 
-    if (!invoiceNumber || !partyName || !items || items.length === 0) {
+    if (!invoiceNumber || !partyName || !vendor || !items || items.length === 0) {
       return res.status(400).json({
-        error: 'Invoice number, party name and at least one item are required',
+        error: 'Invoice number, vendor, party name and at least one item are required',
       });
     }
 
@@ -96,20 +98,27 @@ exports.createPurchaseInvoice = async (req, res) => {
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
 
+    // 🔹 GST on before-tax charges
+    const beforeTaxGst =
+      (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
+
     // 🔹 Add to totals
     const totalInvoiceValue =
       totalTaxableValue +
       beforeTaxTotal +
       gstTotal +
+      beforeTaxGst +
       (otherChargesAfterTax || 0);
 
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
       date: date || new Date(),
+      vendor, // ✅ save vendor ObjectId
       partyName,
       items: processedItems,
       otherChargesBeforeTaxAmount: beforeTaxFixedValue,
       otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
+      otherChargesBeforeTaxGstRate: otherChargesBeforeTaxGstRate || 0,
       otherChargesAfterTax: otherChargesAfterTax || 0,
       totalTaxableValue: totalTaxableValue + beforeTaxTotal,
       totalInvoiceValue,
@@ -129,7 +138,8 @@ exports.createPurchaseInvoice = async (req, res) => {
 // Get all invoices
 exports.getPurchaseInvoices = async (req, res) => {
   try {
-    const invoices = await PurchaseInvoice.find();
+    const invoices = await PurchaseInvoice.find()
+      .populate('vendor', 'code name gstNumber'); // ✅ include vendor details
     res.status(200).json(invoices);
   } catch (error) {
     console.error('Error fetching invoices:', error);
@@ -140,7 +150,8 @@ exports.getPurchaseInvoices = async (req, res) => {
 // Get invoice by ID
 exports.getPurchaseInvoiceById = async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await PurchaseInvoice.findById(req.params.id)
+      .populate('vendor', 'code name gstNumber');
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     res.status(200).json(invoice);
   } catch (error) {
@@ -156,12 +167,15 @@ exports.updatePurchaseInvoice = async (req, res) => {
       req.params.id,
       req.body,
       { new: true }
-    );
+    ).populate('vendor', 'code name gstNumber');
+
     if (!updatedInvoice)
       return res.status(404).json({ error: 'Invoice not found' });
-    res
-      .status(200)
-      .json({ message: 'Purchase Invoice Updated', invoice: updatedInvoice });
+
+    res.status(200).json({
+      message: 'Purchase Invoice Updated',
+      invoice: updatedInvoice,
+    });
   } catch (error) {
     console.error('Error updating invoice:', error);
     res.status(500).json({ error: 'Server error' });
@@ -193,7 +207,9 @@ exports.getInvoiceReport = async (req, res) => {
       match.date = { $gte: new Date(from), $lte: new Date(to) };
     }
 
-    const invoices = await PurchaseInvoice.find(match).sort({ date: 1 });
+    const invoices = await PurchaseInvoice.find(match)
+      .sort({ date: 1 })
+      .populate('vendor', 'code name gstNumber');
 
     const summary = {
       totalInvoices: invoices.length,
@@ -212,6 +228,8 @@ exports.getInvoiceReport = async (req, res) => {
         InvoiceNumber: inv.invoiceNumber,
         Date: inv.date.toISOString().split('T')[0],
         PartyName: inv.partyName,
+        VendorCode: inv.vendor?.code || '',
+        VendorName: inv.vendor?.name || '',
         TotalTaxableValue: inv.totalTaxableValue,
         TotalInvoiceValue: inv.totalInvoiceValue,
       }));
@@ -244,9 +262,9 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
   try {
     const code = req.params.code;
 
-    const invoices = await PurchaseInvoice.find({ 'items.item': code }).sort({
-      date: -1,
-    });
+    const invoices = await PurchaseInvoice.find({ 'items.item': code })
+      .sort({ date: -1 })
+      .populate('vendor', 'code name gstNumber');
 
     if (!invoices.length) {
       return res.status(404).json({ error: 'No history found for this item' });
@@ -259,6 +277,8 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
           date: inv.date,
           invoiceNumber: inv.invoiceNumber,
           supplierName: inv.partyName,
+          vendorCode: inv.vendor?.code || '',
+          vendorName: inv.vendor?.name || '',
           description: it.description,
           hsnCode: it.hsnCode,
           quantity: it.subQuantity,
