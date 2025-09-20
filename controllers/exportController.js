@@ -1,7 +1,7 @@
 const ExcelJS = require("exceljs");
 const Item = require("../models/item");
 const IssueBill = require("../models/issueBill");
-const PurchaseBill = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/purchaseInvoice");
 
 const IST = "Asia/Kolkata";
 const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
@@ -25,14 +25,13 @@ exports.exportData = async (req, res) => {
 
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch data
-    const [items, issueBills, purchaseBills] = await Promise.all([
+    // Fetch from DB
+    const [items, issueBills, purchaseInvoices] = await Promise.all([
       Item.find().lean(),
       IssueBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
         .populate("items.item")
         .lean(),
-      PurchaseBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
-        .populate("items.item")
+      PurchaseInvoice.find({ createdAt: { $gte: startDate, $lte: endDate } })
         .lean(),
     ]);
 
@@ -74,11 +73,9 @@ exports.exportData = async (req, res) => {
     const itemSheet = workbook.addWorksheet("Items Snapshot");
     itemSheet.columns = [
       { header: "Code", key: "code", width: 18 },
-      { header: "Category", key: "category", width: 20 },
+      { header: "Category (HSN)", key: "hsnCode", width: 18 },
       { header: "Description", key: "description", width: 36 },
-      { header: "Plant", key: "plantName", width: 20 },
-      { header: "Weight", key: "weight", width: 14 },
-      { header: "Unit", key: "unit", width: 10 },
+      { header: "Unit", key: "unit", width: 12 },
       { header: "Main Store Qty", key: "mainStoreQty", width: 16 },
       { header: "Sub Store Qty", key: "subStoreQty", width: 16 },
       { header: "Closing Qty", key: "closingQty", width: 14 },
@@ -89,10 +86,8 @@ exports.exportData = async (req, res) => {
     items.forEach((e) =>
       itemSheet.addRow({
         code: e.code,
-        category: e.category,
+        hsnCode: e.category,
         description: e.description,
-        plantName: e.plantName,
-        weight: e.weight,
         unit: e.unit,
         mainStoreQty: e.mainStoreQty,
         subStoreQty: e.subStoreQty,
@@ -103,36 +98,13 @@ exports.exportData = async (req, res) => {
       })
     );
 
-    // === SUPPLIER HISTORY ===
-    const supplierSheet = workbook.addWorksheet("Supplier History");
-    supplierSheet.columns = [
-      { header: "Item Code", key: "code", width: 18 },
-      { header: "Item Description", key: "description", width: 30 },
-      { header: "Supplier", key: "supplierName", width: 28 },
-      { header: "Amount", key: "amount", width: 18 },
-      { header: "Date", key: "date", width: 22 },
-    ];
-    items.forEach((item) => {
-      (item.supplierHistory || []).forEach((sh) => {
-        if (sh.date >= startDate && sh.date <= endDate) {
-          supplierSheet.addRow({
-            code: item.code,
-            description: item.description,
-            supplierName: sh.supplierName,
-            amount: sh.amount,
-            date: sh.date ? fmt(sh.date) : "",
-          });
-        }
-      });
-    });
-
     // === ISSUE BILLS ===
     const issueSheet = workbook.addWorksheet("Issue Bills");
     issueSheet.columns = [
       { header: "Department", key: "department", width: 20 },
       { header: "Issued By", key: "issuedBy", width: 22 },
       { header: "Created At", key: "createdAt", width: 22 },
-      { header: "Items", key: "items", width: 60 },
+      { header: "Items", key: "items", width: 80 },
     ];
     issueBills.forEach((b) => {
       issueSheet.addRow({
@@ -144,49 +116,44 @@ exports.exportData = async (req, res) => {
             .map((i) => {
               const name =
                 i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity})`; // ✅ no rate here
+              return `${name} (x${i.quantity})`;
             })
             .join(", ") || "",
       });
     });
 
-    // === PURCHASE BILLS ===
-    const purchaseSheet = workbook.addWorksheet("Purchase Bills");
+    // === PURCHASE INVOICES ===
+    const purchaseSheet = workbook.addWorksheet("Purchase Invoices");
     purchaseSheet.columns = [
-      { header: "Bill No", key: "billNo", width: 16 },
-      { header: "Supplier", key: "supplierName", width: 28 },
-      { header: "Total Amount", key: "totalAmount", width: 18 },
-      { header: "Created At", key: "createdAt", width: 22 },
-      { header: "Items", key: "items", width: 60 },
+      { header: "Invoice No", key: "invoiceNumber", width: 16 },
+      { header: "Party Name", key: "partyName", width: 28 },
+      { header: "Invoice Value", key: "totalInvoiceValue", width: 18 },
+      { header: "Date", key: "date", width: 22 },
+      { header: "Items", key: "items", width: 80 },
     ];
-    purchaseBills.forEach((b) => {
+    purchaseInvoices.forEach((inv) => {
       purchaseSheet.addRow({
-        billNo: b.billNo,
-        supplierName: b.supplierName,
-        totalAmount: b.totalAmount,
-        createdAt: b.createdAt ? fmt(b.createdAt) : "",
+        invoiceNumber: inv.invoiceNumber,
+        partyName: inv.partyName,
+        totalInvoiceValue: inv.totalInvoiceValue,
+        date: inv.date ? fmt(inv.date) : "",
         items:
-          (b.items || [])
+          (inv.items || [])
             .map((i) => {
-              const name =
-                i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity}) @${i.rate}`; // ✅ keep rate here
+              return `${i.item} (SubQty: ${i.subQuantity} ${i.subQuantityMeasurement}) @${i.rate}`;
             })
             .join(", ") || "",
       });
     });
 
     // === Style headers ===
-    [ledgerSheet, itemSheet, supplierSheet, issueSheet, purchaseSheet].forEach(
-      (ws) => {
-        ws.getRow(1).font = { bold: true };
-        ws.columns.forEach((col) => {
-          col.alignment = { vertical: "middle", horizontal: "left" };
-        });
-      }
-    );
+    [ledgerSheet, itemSheet, issueSheet, purchaseSheet].forEach((ws) => {
+      ws.getRow(1).font = { bold: true };
+      ws.columns.forEach((col) => {
+        col.alignment = { vertical: "middle", horizontal: "left" };
+      });
+    });
 
-    // === Send file ===
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
