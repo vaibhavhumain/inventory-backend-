@@ -2,7 +2,7 @@ const ExcelJS = require("exceljs");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 
 const IST = "Asia/Kolkata";
-const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
+const fmt = (d) => new Date(d).toLocaleString("en-IN");
 
 exports.exportData = async (req, res) => {
   try {
