@@ -1,6 +1,4 @@
 const ExcelJS = require("exceljs");
-const Item = require("../models/item");
-const IssueBill = require("../models/issueBill");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 
 const IST = "Asia/Kolkata";
@@ -11,9 +9,7 @@ exports.exportData = async (req, res) => {
     let { from, to } = req.query;
 
     if (!from) {
-      return res
-        .status(400)
-        .json({ error: "Please provide ?from=YYYY-MM-DD" });
+      return res.status(400).json({ error: "Please provide ?from=YYYY-MM-DD" });
     }
 
     const startDate = new Date(from);
@@ -25,129 +21,77 @@ exports.exportData = async (req, res) => {
 
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch from DB
-    const [items, issueBills, purchaseInvoices] = await Promise.all([
-      Item.find().lean(),
-      IssueBill.find({ createdAt: { $gte: startDate, $lte: endDate } })
-        .populate("items.item")
-        .lean(),
-      PurchaseInvoice.find({ createdAt: { $gte: startDate, $lte: endDate } })
-        .lean(),
-    ]);
+    const purchaseInvoices = await PurchaseInvoice.find({
+      createdAt: { $gte: startDate, $lte: endDate },
+    }).lean();
 
     const workbook = new ExcelJS.Workbook();
 
-    // === STOCK LEDGER ===
-    const ledgerSheet = workbook.addWorksheet("Stock Ledger");
-    ledgerSheet.columns = [
-      { header: "Item Code", key: "code", width: 16 },
-      { header: "Item Description", key: "description", width: 28 },
-      { header: "In", key: "in", width: 10 },
-      { header: "Out", key: "out", width: 10 },
-      { header: "Closing Qty", key: "closingQty", width: 14 },
-      { header: "Main Store", key: "mainStoreQty", width: 14 },
-      { header: "Sub Store", key: "subStoreQty", width: 14 },
-      { header: "Date", key: "date", width: 22 },
-      { header: "Remarks", key: "remarks", width: 30 },
-    ];
-
-    items.forEach((item) => {
-      (item.dailyStock || []).forEach((ds) => {
-        if (ds.date >= startDate && ds.date <= endDate) {
-          ledgerSheet.addRow({
-            code: item.code,
-            description: item.description,
-            in: ds.in || 0,
-            out: ds.out || 0,
-            closingQty: ds.closingQty,
-            mainStoreQty: ds.mainStoreQty,
-            subStoreQty: ds.subStoreQty,
-            date: ds.date ? fmt(ds.date) : "",
-            remarks: item.remarks || "",
-          });
-        }
-      });
-    });
-
-    // === ITEMS SNAPSHOT ===
-    const itemSheet = workbook.addWorksheet("Items Snapshot");
-    itemSheet.columns = [
-      { header: "Code", key: "code", width: 18 },
-      { header: "Category (HSN)", key: "hsnCode", width: 18 },
-      { header: "Description", key: "description", width: 36 },
-      { header: "Unit", key: "unit", width: 12 },
-      { header: "Main Store Qty", key: "mainStoreQty", width: 16 },
-      { header: "Sub Store Qty", key: "subStoreQty", width: 16 },
-      { header: "Closing Qty", key: "closingQty", width: 14 },
-      { header: "Remarks", key: "remarks", width: 26 },
-      { header: "Created At", key: "createdAt", width: 22 },
-      { header: "Updated At", key: "updatedAt", width: 22 },
-    ];
-    items.forEach((e) =>
-      itemSheet.addRow({
-        code: e.code,
-        hsnCode: e.category,
-        description: e.description,
-        unit: e.unit,
-        mainStoreQty: e.mainStoreQty,
-        subStoreQty: e.subStoreQty,
-        closingQty: e.closingQty,
-        remarks: e.remarks || "",
-        createdAt: e.createdAt ? fmt(e.createdAt) : "",
-        updatedAt: e.updatedAt ? fmt(e.updatedAt) : "",
-      })
-    );
-
-    // === ISSUE BILLS ===
-    const issueSheet = workbook.addWorksheet("Issue Bills");
-    issueSheet.columns = [
-      { header: "Department", key: "department", width: 20 },
-      { header: "Issued By", key: "issuedBy", width: 22 },
-      { header: "Created At", key: "createdAt", width: 22 },
-      { header: "Items", key: "items", width: 80 },
-    ];
-    issueBills.forEach((b) => {
-      issueSheet.addRow({
-        department: b.department,
-        issuedBy: b.issuedBy,
-        createdAt: b.createdAt ? fmt(b.createdAt) : "",
-        items:
-          (b.items || [])
-            .map((i) => {
-              const name =
-                i.item?.description || i.item?.code || i.itemName || "Item";
-              return `${name} (x${i.quantity})`;
-            })
-            .join(", ") || "",
-      });
-    });
-
-    // === PURCHASE INVOICES ===
     const purchaseSheet = workbook.addWorksheet("Purchase Invoices");
     purchaseSheet.columns = [
       { header: "Invoice No", key: "invoiceNumber", width: 16 },
       { header: "Party Name", key: "partyName", width: 28 },
-      { header: "Invoice Value", key: "totalInvoiceValue", width: 18 },
-      { header: "Date", key: "date", width: 22 },
-      { header: "Items", key: "items", width: 80 },
+      { header: "Invoice Date", key: "date", width: 20 },
+      { header: "Other Charges Before Tax (Amt)", key: "otherChargesBeforeTaxAmount", width: 22 },
+      { header: "Other Charges Before Tax (%)", key: "otherChargesBeforeTaxPercent", width: 22 },
+      { header: "GST on Before Tax Charges (%)", key: "otherChargesBeforeTaxGstRate", width: 26 },
+      { header: "Other Charges After Tax", key: "otherChargesAfterTax", width: 22 },
+      { header: "Total Taxable Value", key: "totalTaxableValue", width: 22 },
+      { header: "Total Invoice Value", key: "totalInvoiceValue", width: 22 },
     ];
+
     purchaseInvoices.forEach((inv) => {
       purchaseSheet.addRow({
         invoiceNumber: inv.invoiceNumber,
         partyName: inv.partyName,
-        totalInvoiceValue: inv.totalInvoiceValue,
         date: inv.date ? fmt(inv.date) : "",
-        items:
-          (inv.items || [])
-            .map((i) => {
-              return `${i.item} (SubQty: ${i.subQuantity} ${i.subQuantityMeasurement}) @${i.rate}`;
-            })
-            .join(", ") || "",
+        otherChargesBeforeTaxAmount: inv.otherChargesBeforeTaxAmount || 0,
+        otherChargesBeforeTaxPercent: inv.otherChargesBeforeTaxPercent || 0,
+        otherChargesBeforeTaxGstRate: inv.otherChargesBeforeTaxGstRate || 0,
+        otherChargesAfterTax: inv.otherChargesAfterTax || 0,
+        totalTaxableValue: inv.totalTaxableValue || 0,
+        totalInvoiceValue: inv.totalInvoiceValue || 0,
       });
     });
 
-    // === Style headers ===
-    [ledgerSheet, itemSheet, issueSheet, purchaseSheet].forEach((ws) => {
+    const itemSheet = workbook.addWorksheet("Invoice Items");
+    itemSheet.columns = [
+      { header: "Invoice No", key: "invoiceNumber", width: 16 },
+      { header: "Party Name", key: "partyName", width: 28 },
+      { header: "Item", key: "item", width: 22 },
+      { header: "Description", key: "description", width: 36 },
+      { header: "Head Qty", key: "headQuantity", width: 14 },
+      { header: "Head UOM", key: "headQuantityMeasurement", width: 14 },
+      { header: "Sub Qty", key: "subQuantity", width: 14 },
+      { header: "Sub UOM", key: "subQuantityMeasurement", width: 14 },
+      { header: "HSN Code", key: "hsnCode", width: 16 },
+      { header: "Rate", key: "rate", width: 14 },
+      { header: "Amount", key: "amount", width: 18 },
+      { header: "GST %", key: "gstRate", width: 12 },
+      { header: "Notes", key: "notes", width: 30 },
+    ];
+
+    purchaseInvoices.forEach((inv) => {
+      (inv.items || []).forEach((i) => {
+        itemSheet.addRow({
+          invoiceNumber: inv.invoiceNumber,
+          partyName: inv.partyName,
+          item: i.item,
+          description: i.description,
+          headQuantity: i.headQuantity,
+          headQuantityMeasurement: i.headQuantityMeasurement,
+          subQuantity: i.subQuantity,
+          subQuantityMeasurement: i.subQuantityMeasurement,
+          hsnCode: i.hsnCode,
+          rate: i.rate,
+          amount: i.amount,
+          gstRate: i.gstRate,
+          notes: i.notes || "",
+        });
+      });
+    });
+
+    [purchaseSheet, itemSheet].forEach((ws) => {
       ws.getRow(1).font = { bold: true };
       ws.columns.forEach((col) => {
         col.alignment = { vertical: "middle", horizontal: "left" };
@@ -160,7 +104,7 @@ exports.exportData = async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="inventory-report-${from}_to_${to || from}.xlsx"`
+      `attachment; filename="purchase-invoices-${from}_to_${to || from}.xlsx"`
     );
 
     await workbook.xlsx.write(res);

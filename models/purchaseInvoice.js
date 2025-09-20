@@ -22,7 +22,7 @@ const purchaseInvoiceSchema = new mongoose.Schema({
   partyName: { type: String, required: true },
 
   items: [invoiceItemSchema],
-
+  
   // ✅ before-tax charges
   otherChargesBeforeTaxAmount: { type: Number, default: 0 },
   otherChargesBeforeTaxPercent: { type: Number, default: 0 },
