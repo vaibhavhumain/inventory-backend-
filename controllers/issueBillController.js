@@ -1,5 +1,6 @@
 const IssueBill = require('../models/issueBill');
 const Item = require('../models/item');
+const InventoryTransaction = require('../models/InventoryTransaction');
 
 // ✅ Create Issue Bill
 exports.createIssueBill = async (req, res) => {
@@ -21,23 +22,24 @@ exports.createIssueBill = async (req, res) => {
       const dbItem = await Item.findById(it.item);
       if (!dbItem) return res.status(400).json({ error: `Item ${it.item} not found` });
 
+      // ✅ Stock validation + update
       if (type === 'MAIN_TO_SUB') {
         if (dbItem.mainStoreQty < it.quantity) {
-          return res.status(400).json({ error: `Not enough stock in Main Store for ${dbItem.description}` });
+          return res.status(400).json({ error: `Not enough stock in Main Store for ${dbItem.name}` });
         }
         dbItem.mainStoreQty -= it.quantity;
         dbItem.subStoreQty += it.quantity;
       } else if (type === 'SUB_TO_USER') {
         if (dbItem.subStoreQty < it.quantity) {
-          return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.description}` });
+          return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.name}` });
         }
         dbItem.subStoreQty -= it.quantity;
       }
 
+      // ✅ Update closing qty
       const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
       dbItem.closingQty = closingQty;
 
-      // 🔹 Correct in/out logic
       dbItem.dailyStock.push({
         date: new Date(),
         in: 0,
@@ -49,6 +51,18 @@ exports.createIssueBill = async (req, res) => {
 
       await dbItem.save();
 
+      // ✅ Create Inventory Transaction
+      await InventoryTransaction.create({
+        item: dbItem._id,
+        type: type === 'MAIN_TO_SUB' ? 'ISSUE_TO_SUB' : 'CONSUMPTION', // if SUB_TO_USER we treat as consumption
+        quantity: it.quantity,
+        date: issueDate || new Date(),
+        meta: {
+          note: `Issued by ${issuedBy || 'N/A'} to ${issuedTo || department}`,
+        },
+      });
+
+      // ✅ Amount calculation
       const amount = (it.rate || 0) * (it.quantity || 0);
       totalAmount += amount;
 
@@ -56,7 +70,7 @@ exports.createIssueBill = async (req, res) => {
         item: it.item,
         quantity: it.quantity,
         rate: it.rate || 0,
-        amount
+        amount,
       });
     }
 
@@ -67,7 +81,7 @@ exports.createIssueBill = async (req, res) => {
       issuedTo: type === 'SUB_TO_USER' ? issuedTo : undefined,
       items: processedItems,
       totalAmount,
-      issuedBy
+      issuedBy,
     });
 
     await newBill.save();
@@ -107,143 +121,6 @@ exports.getIssueBillById = async (req, res) => {
     if (!bill) return res.status(404).json({ error: "Issue Bill not found" });
     res.status(200).json(bill);
   } catch (error) {
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// ✅ Update Issue Bill
-exports.updateIssueBill = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { items, department, issuedBy, issueDate, type, issuedTo } = req.body;
-
-    const oldBill = await IssueBill.findById(id);
-    if (!oldBill) return res.status(404).json({ error: "Issue Bill not found" });
-
-    // 🔹 Reverse old stock
-    for (const it of oldBill.items) {
-      const dbItem = await Item.findById(it.item);
-      if (!dbItem) continue;
-
-      if (oldBill.type === 'MAIN_TO_SUB') {
-        dbItem.mainStoreQty += it.quantity;
-        dbItem.subStoreQty = Math.max(0, dbItem.subStoreQty - it.quantity);
-      } else if (oldBill.type === 'SUB_TO_USER') {
-        dbItem.subStoreQty += it.quantity;
-      }
-
-      const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
-      dbItem.closingQty = closingQty;
-
-      dbItem.dailyStock.push({
-        date: new Date(),
-        in: it.quantity,
-        out: 0,
-        closingQty,
-        mainStoreQty: dbItem.mainStoreQty,
-        subStoreQty: dbItem.subStoreQty,
-      });
-
-      await dbItem.save();
-    }
-
-    // 🔹 Apply new items
-    let totalAmount = 0;
-    const processedItems = [];
-
-    for (const it of items) {
-      const dbItem = await Item.findById(it.item);
-      if (!dbItem) continue;
-
-      if (type === 'MAIN_TO_SUB') {
-        if (dbItem.mainStoreQty < it.quantity) {
-          return res.status(400).json({ error: `Not enough stock in Main Store for ${dbItem.description}` });
-        }
-        dbItem.mainStoreQty -= it.quantity;
-        dbItem.subStoreQty += it.quantity;
-      } else if (type === 'SUB_TO_USER') {
-        if (dbItem.subStoreQty < it.quantity) {
-          return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.description}` });
-        }
-        dbItem.subStoreQty -= it.quantity;
-      }
-
-      const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
-      dbItem.closingQty = closingQty;
-
-      dbItem.dailyStock.push({
-        date: new Date(),
-        in: 0,
-        out: it.quantity,
-        closingQty,
-        mainStoreQty: dbItem.mainStoreQty,
-        subStoreQty: dbItem.subStoreQty,
-      });
-
-      await dbItem.save();
-
-      const amount = (it.rate || 0) * (it.quantity || 0);
-      totalAmount += amount;
-
-      processedItems.push({
-        item: it.item,
-        quantity: it.quantity,
-        rate: it.rate || 0,
-        amount
-      });
-    }
-
-    oldBill.items = processedItems;
-    oldBill.department = department || oldBill.department;
-    oldBill.issuedBy = issuedBy || oldBill.issuedBy;
-    oldBill.issueDate = issueDate || oldBill.issueDate;
-    oldBill.type = type || oldBill.type;
-    oldBill.issuedTo = type === 'SUB_TO_USER' ? issuedTo : undefined;
-    oldBill.totalAmount = totalAmount;
-
-    await oldBill.save();
-    res.status(200).json({ message: "✅ Issue Bill Updated", bill: oldBill });
-  } catch (error) {
-    console.error("Error updating issue bill:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// ✅ Delete Issue Bill
-exports.deleteIssueBill = async (req, res) => {
-  try {
-    const deletedBill = await IssueBill.findByIdAndDelete(req.params.id);
-    if (!deletedBill) return res.status(404).json({ error: "Issue Bill not found" });
-
-    for (const it of deletedBill.items) {
-      const dbItem = await Item.findById(it.item);
-      if (!dbItem) continue;
-
-      if (deletedBill.type === 'MAIN_TO_SUB') {
-        dbItem.mainStoreQty += it.quantity;
-        dbItem.subStoreQty = Math.max(0, dbItem.subStoreQty - it.quantity);
-      } else if (deletedBill.type === 'SUB_TO_USER') {
-        dbItem.subStoreQty += it.quantity;
-      }
-
-      const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
-      dbItem.closingQty = closingQty;
-
-      dbItem.dailyStock.push({
-        date: new Date(),
-        in: it.quantity,
-        out: 0,
-        closingQty,
-        mainStoreQty: dbItem.mainStoreQty,
-        subStoreQty: dbItem.subStoreQty,
-      });
-
-      await dbItem.save();
-    }
-
-    res.status(200).json({ message: "✅ Issue Bill Deleted & Stock Reversed" });
-  } catch (error) {
-    console.error("Error deleting issue bill:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
