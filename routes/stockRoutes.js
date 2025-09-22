@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getAllItemsSummary, getItemSummary } = require('../services/stockService');
+const { getAllItemsSummary, getItemSummary } = require('../services/Stock');
 
 // Get summary of all items (for Stock Summary Page)
 router.get('/summary', async (req, res) => {
