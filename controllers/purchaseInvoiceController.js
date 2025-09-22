@@ -42,9 +42,6 @@ async function generateItemCode(category) {
   console.log("   -> newCode:", newCode);
   return newCode;
 }
-
-
-
 // Create purchase invoice
 exports.createPurchaseInvoice = async (req, res) => {
   try {
@@ -60,6 +57,7 @@ exports.createPurchaseInvoice = async (req, res) => {
       otherChargesAfterTax,
     } = req.body;
 
+    // Validation
     if (!invoiceNumber || !partyName || !vendor || !items?.length) {
       return res.status(400).json({
         error: "Invoice number, vendor, party name and at least one item are required",
@@ -67,42 +65,57 @@ exports.createPurchaseInvoice = async (req, res) => {
     }
 
     let totalTaxableValue = 0;
-    const processedItems = [];
     let gstTotal = 0;
+    const processedItems = [];
 
+    for (const it of items) {
+      // Allow name from either frontend `name`, `item`, or `description`
+      const itemName = it.name || it.item || it.description;
+      if (!itemName) {
+        return res.status(400).json({ error: "Item name is required for new items" });
+      }
 
-for (const it of items) {
-  const itemName = it.name || it.item || it.description;
-  if (!itemName) {
-    return res.status(400).json({ error: "Item name is required for new items" });
-  }
+      // 🔹 Calculate amount
+      const amount = (it.subQuantity || 0) * (it.rate || 0);
+      totalTaxableValue += amount;
 
-  let existingItem = await Item.findOne({ name: itemName });
-  if (!existingItem) {
-    const code = await generateItemCode(it.category || "raw material");
+      if (it.gstRate) {
+        gstTotal += (amount * it.gstRate) / 100;
+      }
 
-    existingItem = new Item({
-      code,
-      name: itemName,   // ✅ always saved as name
-      category: it.category || "raw material",
-      description: it.description,
-      unit: it.subQuantityMeasurement,
-      hsnCode: it.hsnCode,
-      closingQty: it.subQuantity,
-      mainStoreQty: it.subQuantity,
-      dailyStock: [{
-        date: new Date(),
-        in: it.subQuantity,
-        out: 0,
-        closingQty: it.subQuantity,
-        mainStoreQty: it.subQuantity,
-        subStoreQty: 0
-      }]
-    });
-    await existingItem.save();
-  }
- else {
-        // 🔹 update stock for existing item
+      // 🔹 Check if item already exists
+      let existingItem = await Item.findOne({ name: itemName });
+
+      // 🔹 If not exists, create new Item
+      if (!existingItem) {
+        const code = await generateItemCode(it.category || "raw material");
+
+        existingItem = new Item({
+          code,
+          name: itemName,
+          category: it.category || "raw material",
+          description: it.description,
+          unit: it.subQuantityMeasurement,
+          hsnCode: it.hsnCode,
+          closingQty: it.subQuantity,
+          mainStoreQty: it.subQuantity,
+          subStoreQty: 0,
+          remarks: it.notes || null,
+          dailyStock: [
+            {
+              date: new Date(),
+              in: it.subQuantity,
+              out: 0,
+              closingQty: it.subQuantity,
+              mainStoreQty: it.subQuantity,
+              subStoreQty: 0,
+            },
+          ],
+        });
+
+        await existingItem.save();
+      } else {
+        // 🔹 Update stock if item exists
         existingItem.closingQty += (it.subQuantity || 0);
         existingItem.mainStoreQty += (it.subQuantity || 0);
 
@@ -118,7 +131,7 @@ for (const it of items) {
         await existingItem.save();
       }
 
-      // 🔹 Push invoice item with Item._id
+      // 🔹 Add processed item for invoice
       processedItems.push({
         item: existingItem._id,
         description: it.description,
@@ -134,7 +147,7 @@ for (const it of items) {
       });
     }
 
-    // before-tax & totals
+    // 🔹 Calculate totals
     const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
@@ -144,6 +157,7 @@ for (const it of items) {
     const totalInvoiceValue =
       totalTaxableValue + beforeTaxTotal + gstTotal + beforeTaxGst + (otherChargesAfterTax || 0);
 
+    // 🔹 Create invoice
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
       date: date || new Date(),
@@ -159,6 +173,7 @@ for (const it of items) {
     });
 
     await newInvoice.save();
+
     res.status(201).json({
       message: "Purchase Invoice Added Successfully",
       invoice: newInvoice,
@@ -168,6 +183,7 @@ for (const it of items) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // Get all invoices
 exports.getPurchaseInvoices = async (req, res) => {
