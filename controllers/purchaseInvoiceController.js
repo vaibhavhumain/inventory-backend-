@@ -189,7 +189,9 @@ exports.createPurchaseInvoice = async (req, res) => {
 exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
-      .populate('vendor', 'code name gstNumber'); 
+      .populate('vendor', 'code name gstNumber')
+      .populate('items.item', 'name code category'); // 🔹 ensure item names are returned
+
     res.status(200).json(invoices);
   } catch (error) {
     console.error('Error fetching invoices:', error);
