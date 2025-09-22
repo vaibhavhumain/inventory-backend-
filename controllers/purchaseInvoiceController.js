@@ -71,63 +71,36 @@ exports.createPurchaseInvoice = async (req, res) => {
     let gstTotal = 0;
 
 
+for (const it of items) {
+  const itemName = it.name || it.item || it.description;
+  if (!itemName) {
+    return res.status(400).json({ error: "Item name is required for new items" });
+  }
 
-    for (const it of items) {     
-    if (!it.name) {
-      return res.status(400).json({ error: "Item name is required for new items" });
-    }
-    if (!it.category) {
-      return res.status(400).json({ error: "Item category is required for new items" });
-    }
-      const amount = (it.subQuantity || 0) * (it.rate || 0);
-      totalTaxableValue += amount;
+  let existingItem = await Item.findOne({ name: itemName });
+  if (!existingItem) {
+    const code = await generateItemCode(it.category || "raw material");
 
-      if (it.gstRate) {
-        gstTotal += (amount * it.gstRate) / 100;
-      }
-
-      // 🔹 Find item by name
-      let existingItem = await Item.findOne({ name: it.name });
-
-      // 🔹 If not exists, create new Item with auto code
-      // 🔹 If not exists, create new Item with auto code
-if (!existingItem) {
-  
-  const safeCategory = it.category?.toLowerCase() || "raw material";
-  const code = await generateItemCode(safeCategory);
-   console.log("🟡 Creating NEW ITEM");
-  console.log("  -> category:", safeCategory);
-  console.log("  -> generated code:", code);
-  console.log("  -> name:", it.name);
-
-
-  console.log("Generated code:", code, "for item:", it.name, "category:", safeCategory);
-
-  existingItem = new Item({
-    code: code,   // ✅ always set
-    name: it.name,
-    category: safeCategory, // ✅ keep consistent with generateItemCode
-    description: it.description,
-    unit: it.subQuantityMeasurement,
-    hsnCode: it.hsnCode,
-    closingQty: it.subQuantity,
-    mainStoreQty: it.subQuantity,
-    subStoreQty: 0,
-    remarks: it.notes || null,
-    dailyStock: [
-      {
+    existingItem = new Item({
+      code,
+      name: itemName,   // ✅ always saved as name
+      category: it.category || "raw material",
+      description: it.description,
+      unit: it.subQuantityMeasurement,
+      hsnCode: it.hsnCode,
+      closingQty: it.subQuantity,
+      mainStoreQty: it.subQuantity,
+      dailyStock: [{
         date: new Date(),
         in: it.subQuantity,
         out: 0,
         closingQty: it.subQuantity,
         mainStoreQty: it.subQuantity,
-        subStoreQty: 0,
-      },
-    ],
-  });
-
-  await existingItem.save();
-}
+        subStoreQty: 0
+      }]
+    });
+    await existingItem.save();
+  }
  else {
         // 🔹 update stock for existing item
         existingItem.closingQty += (it.subQuantity || 0);
