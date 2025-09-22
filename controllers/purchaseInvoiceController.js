@@ -2,6 +2,49 @@ const PurchaseInvoice = require('../models/purchaseInvoice');
 const Item = require('../models/item');
 const XLSX = require('xlsx');
 
+const categoryPrefixes = {
+  "raw material": "RM",
+  consumables: "CON",
+  "bought out": "BOP",
+  hardware: "HW",
+  electronics: "ES",
+  electricals: "EL",
+  paints: "PT",
+  rubbers: "RB",
+  chemicals: "CH",
+  adhesive: "AD",
+  plastics: "PL",
+  furniture: "FR",
+};
+
+async function generateItemCode(category) {
+  const safeCategory = category?.toLowerCase() || "raw material";
+  const prefix = categoryPrefixes[safeCategory] || "ITM";
+
+  const lastItem = await Item.findOne({ category: safeCategory })
+    .sort({ code: -1 })
+    .collation({ locale: "en", numericOrdering: true });
+
+  console.log("🔹 generateItemCode");
+  console.log("   safeCategory:", safeCategory);
+  console.log("   prefix:", prefix);
+  console.log("   lastItem:", lastItem?.code);
+
+  let newCode;
+  if (!lastItem) {
+    newCode = `${prefix}0001`;
+  } else {
+    const match = lastItem.code?.match(/(\d+)$/);
+    const lastNum = match ? parseInt(match[1], 10) : 0;
+    newCode = `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
+  }
+
+  console.log("   -> newCode:", newCode);
+  return newCode;
+}
+
+
+
 // Create purchase invoice
 exports.createPurchaseInvoice = async (req, res) => {
   try {
@@ -9,17 +52,17 @@ exports.createPurchaseInvoice = async (req, res) => {
       invoiceNumber,
       date,
       partyName,
-      vendor, // ✅ include vendor
+      vendor,
       items,
       otherChargesBeforeTaxAmount,
       otherChargesBeforeTaxPercent,
-      otherChargesBeforeTaxGstRate, // ✅ include GST rate
+      otherChargesBeforeTaxGstRate,
       otherChargesAfterTax,
     } = req.body;
 
-    if (!invoiceNumber || !partyName || !vendor || !items || items.length === 0) {
+    if (!invoiceNumber || !partyName || !vendor || !items?.length) {
       return res.status(400).json({
-        error: 'Invoice number, vendor, party name and at least one item are required',
+        error: "Invoice number, vendor, party name and at least one item are required",
       });
     }
 
@@ -27,7 +70,15 @@ exports.createPurchaseInvoice = async (req, res) => {
     const processedItems = [];
     let gstTotal = 0;
 
-    for (const it of items) {
+
+
+    for (const it of items) {     
+    if (!it.name) {
+      return res.status(400).json({ error: "Item name is required for new items" });
+    }
+    if (!it.category) {
+      return res.status(400).json({ error: "Item category is required for new items" });
+    }
       const amount = (it.subQuantity || 0) * (it.rate || 0);
       totalTaxableValue += amount;
 
@@ -35,8 +86,68 @@ exports.createPurchaseInvoice = async (req, res) => {
         gstTotal += (amount * it.gstRate) / 100;
       }
 
+      // 🔹 Find item by name
+      let existingItem = await Item.findOne({ name: it.name });
+
+      // 🔹 If not exists, create new Item with auto code
+      // 🔹 If not exists, create new Item with auto code
+if (!existingItem) {
+  
+  const safeCategory = it.category?.toLowerCase() || "raw material";
+  const code = await generateItemCode(safeCategory);
+   console.log("🟡 Creating NEW ITEM");
+  console.log("  -> category:", safeCategory);
+  console.log("  -> generated code:", code);
+  console.log("  -> name:", it.name);
+
+
+  console.log("Generated code:", code, "for item:", it.name, "category:", safeCategory);
+
+  existingItem = new Item({
+    code: code,   // ✅ always set
+    name: it.name,
+    category: safeCategory, // ✅ keep consistent with generateItemCode
+    description: it.description,
+    unit: it.subQuantityMeasurement,
+    hsnCode: it.hsnCode,
+    closingQty: it.subQuantity,
+    mainStoreQty: it.subQuantity,
+    subStoreQty: 0,
+    remarks: it.notes || null,
+    dailyStock: [
+      {
+        date: new Date(),
+        in: it.subQuantity,
+        out: 0,
+        closingQty: it.subQuantity,
+        mainStoreQty: it.subQuantity,
+        subStoreQty: 0,
+      },
+    ],
+  });
+
+  await existingItem.save();
+}
+ else {
+        // 🔹 update stock for existing item
+        existingItem.closingQty += (it.subQuantity || 0);
+        existingItem.mainStoreQty += (it.subQuantity || 0);
+
+        existingItem.dailyStock.push({
+          date: new Date(),
+          in: it.subQuantity || 0,
+          out: 0,
+          closingQty: existingItem.closingQty,
+          mainStoreQty: existingItem.mainStoreQty,
+          subStoreQty: existingItem.subStoreQty || 0,
+        });
+
+        await existingItem.save();
+      }
+
+      // 🔹 Push invoice item with Item._id
       processedItems.push({
-        item: it.item,
+        item: existingItem._id,
         description: it.description,
         headQuantity: it.headQuantity,
         headQuantityMeasurement: it.headQuantityMeasurement,
@@ -48,72 +159,22 @@ exports.createPurchaseInvoice = async (req, res) => {
         gstRate: it.gstRate,
         notes: it.notes,
       });
-
-      // 🔹 Sync with Item collection
-      let existing = await Item.findOne({ code: it.item });
-
-      if (existing) {
-        existing.closingQty = (existing.closingQty || 0) + (it.subQuantity || 0);
-        existing.mainStoreQty =
-          (existing.mainStoreQty || 0) + (it.subQuantity || 0);
-
-        existing.dailyStock.push({
-          date: new Date(),
-          in: it.subQuantity || 0,
-          out: 0,
-          closingQty: existing.closingQty,
-          mainStoreQty: existing.mainStoreQty,
-          subStoreQty: existing.subStoreQty || 0,
-        });
-
-        await existing.save();
-      } else {
-        const newItem = new Item({
-          code: it.item,
-          description: it.description,
-          category: it.hsnCode,
-          unit: it.subQuantityMeasurement,
-          closingQty: it.subQuantity,
-          mainStoreQty: it.subQuantity,
-          subStoreQty: 0,
-          remarks: it.notes || null,
-          dailyStock: [
-            {
-              date: new Date(),
-              in: it.subQuantity,
-              out: 0,
-              closingQty: it.subQuantity,
-              mainStoreQty: it.subQuantity,
-              subStoreQty: 0,
-            },
-          ],
-        });
-        await newItem.save();
-      }
     }
 
-    // 🔹 Calculate before-tax charges
-    const beforeTaxPercentValue =
-      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    // before-tax & totals
+    const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
 
-    // 🔹 GST on before-tax charges
-    const beforeTaxGst =
-      (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
+    const beforeTaxGst = (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
 
-    // 🔹 Add to totals
     const totalInvoiceValue =
-      totalTaxableValue +
-      beforeTaxTotal +
-      gstTotal +
-      beforeTaxGst +
-      (otherChargesAfterTax || 0);
+      totalTaxableValue + beforeTaxTotal + gstTotal + beforeTaxGst + (otherChargesAfterTax || 0);
 
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
       date: date || new Date(),
-      vendor, // ✅ save vendor ObjectId
+      vendor,
       partyName,
       items: processedItems,
       otherChargesBeforeTaxAmount: beforeTaxFixedValue,
@@ -126,12 +187,12 @@ exports.createPurchaseInvoice = async (req, res) => {
 
     await newInvoice.save();
     res.status(201).json({
-      message: 'Purchase Invoice Added Successfully',
+      message: "Purchase Invoice Added Successfully",
       invoice: newInvoice,
     });
   } catch (error) {
-    console.error('Error adding purchase invoice:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error("Error adding purchase invoice:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 
@@ -139,7 +200,7 @@ exports.createPurchaseInvoice = async (req, res) => {
 exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
-      .populate('vendor', 'code name gstNumber'); // ✅ include vendor details
+      .populate('vendor', 'code name gstNumber'); 
     res.status(200).json(invoices);
   } catch (error) {
     console.error('Error fetching invoices:', error);
@@ -260,19 +321,27 @@ exports.getInvoiceReport = async (req, res) => {
 // Get item history (from purchase invoices)
 exports.getItemHistoryFromInvoices = async (req, res) => {
   try {
-    const code = req.params.code;
+    const { code } = req.params;
 
-    const invoices = await PurchaseInvoice.find({ 'items.item': code })
+    // 🔹 Find the Item by code
+    const item = await Item.findOne({ code });
+    if (!item) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    // 🔹 Now use item._id to search invoices
+    const invoices = await PurchaseInvoice.find({ 'items.item': item._id })
       .sort({ date: -1 })
-      .populate('vendor', 'code name gstNumber');
+      .populate('vendor', 'code name gstNumber')
+      .populate('items.item', 'code name category'); // optional: populate item info
 
     if (!invoices.length) {
-      return res.status(404).json({ error: 'No history found for this item' });
+      return res.status(404).json({ error: "No history found for this item" });
     }
 
     const supplierHistory = invoices.flatMap((inv) =>
       inv.items
-        .filter((it) => it.item === code)
+        .filter((it) => String(it.item._id) === String(item._id))
         .map((it) => ({
           date: inv.date,
           invoiceNumber: inv.invoiceNumber,
@@ -302,11 +371,12 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json({
+      item: { code: item.code, name: item.name },
       supplierHistory,
       stock: stockHistory,
     });
   } catch (error) {
-    console.error('Error fetching item history:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error("Error fetching item history:", error);
+    res.status(500).json({ error: "Server error" });
   }
 };
