@@ -13,6 +13,7 @@ const analysisRoutes = require('./routes/analysisRoutes');
 const adminRoutes = require('./routes/admin');
 const vendorRoutes = require('./routes/vendorRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
+const stockRoutes2 = require('./routes/stockRoutes');
 connectDB();
 
 const app = express();
@@ -31,7 +32,7 @@ app.use(express.json());
 app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/purchase-invoices', purchaseBillInvoice);
-app.use('/api/stock', stockRoutes);
+app.use('/api/stock-ledger', stockRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/issue-bills', issueBillRoutes);
@@ -39,6 +40,7 @@ app.use('/api/analysis', analysisRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/stock', stockRoutes2);
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();
