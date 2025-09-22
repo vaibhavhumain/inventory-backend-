@@ -201,7 +201,8 @@ exports.getPurchaseInvoices = async (req, res) => {
 exports.getPurchaseInvoiceById = async (req, res) => {
   try {
     const invoice = await PurchaseInvoice.findById(req.params.id)
-      .populate('vendor', 'code name gstNumber');
+      .populate('vendor', 'code name gstNumber')
+      .populate('items.item', 'name code'); 
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     res.status(200).json(invoice);
   } catch (error) {
