@@ -1,8 +1,9 @@
 const ExcelJS = require("exceljs");
 const PurchaseInvoice = require("../models/purchaseInvoice");
+const { getAllItemsSummary } = require("../services/Stock"); 
 
 const IST = "Asia/Kolkata";
-const fmt = (d) => new Date(d).toLocaleString("en-IN");
+const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
 
 exports.exportData = async (req, res) => {
   try {
@@ -23,7 +24,11 @@ exports.exportData = async (req, res) => {
 
     const purchaseInvoices = await PurchaseInvoice.find({
       createdAt: { $gte: startDate, $lte: endDate },
-    }).lean();
+    })
+      .populate("items.item", "name unit") 
+      .lean();
+
+    const inventorySummary = await getAllItemsSummary();
 
     const workbook = new ExcelJS.Workbook();
 
@@ -76,7 +81,7 @@ exports.exportData = async (req, res) => {
         itemSheet.addRow({
           invoiceNumber: inv.invoiceNumber,
           partyName: inv.partyName,
-          item: i.item,
+          item: i.item?.name || "", 
           description: i.description,
           headQuantity: i.headQuantity,
           headQuantityMeasurement: i.headQuantityMeasurement,
@@ -91,7 +96,34 @@ exports.exportData = async (req, res) => {
       });
     });
 
-    [purchaseSheet, itemSheet].forEach((ws) => {
+    const invSheet = workbook.addWorksheet("Inventory Summary");
+    invSheet.columns = [
+      { header: "Item", key: "itemName", width: 22 },
+      { header: "Unit", key: "unit", width: 12 },
+      { header: "Purchase (In)", key: "purchaseIn", width: 18 },
+      { header: "Issue to Sub Store", key: "issueToSub", width: 20 },
+      { header: "Consumption", key: "consumption", width: 18 },
+      { header: "Sale", key: "sale", width: 18 },
+      { header: "Balance Main Store", key: "balanceMainStore", width: 20 },
+      { header: "Balance Sub Store", key: "balanceSubStore", width: 20 },
+      { header: "Balance Quantity (Total)", key: "balanceTotal", width: 22 },
+    ];
+
+    inventorySummary.forEach((s) => {
+      invSheet.addRow({
+        itemName: s.itemName,
+        unit: s.unit,
+        purchaseIn: s.purchaseIn || 0,
+        issueToSub: s.issueToSub || 0,
+        consumption: s.consumption || 0,
+        sale: s.sale || 0,
+        balanceMainStore: s.balanceMainStore || 0,
+        balanceSubStore: s.balanceSubStore || 0,
+        balanceTotal: s.balanceTotal || 0,
+      });
+    });
+
+    [purchaseSheet, itemSheet, invSheet].forEach((ws) => {
       ws.getRow(1).font = { bold: true };
       ws.columns.forEach((col) => {
         col.alignment = { vertical: "middle", horizontal: "left" };

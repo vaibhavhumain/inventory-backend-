@@ -12,6 +12,7 @@ const issueBillRoutes = require('./routes/issueBillRoutes');
 const analysisRoutes = require('./routes/analysisRoutes');
 const adminRoutes = require('./routes/admin');
 const vendorRoutes = require('./routes/vendorRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
 connectDB();
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/issue-bills', issueBillRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/vendors', vendorRoutes);
+app.use('/api/inventory', inventoryRoutes);
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();

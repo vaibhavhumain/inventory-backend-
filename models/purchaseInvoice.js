@@ -1,7 +1,10 @@
 const mongoose = require('mongoose');
+const InventoryTransaction = require('./InventoryTransaction');
+const Item = require('./item');
 
 const invoiceItemSchema = new mongoose.Schema({
-  item: { type: String, required: true },
+  item: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
+
   description: { type: String },
   headQuantity: { type: Number, required: true },
   headQuantityMeasurement: { type: String, required: true },
@@ -13,7 +16,7 @@ const invoiceItemSchema = new mongoose.Schema({
   gstRate: { type: Number },
   notes: { type: String }
 }, { _id: false });
-
+ 
 const purchaseInvoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
@@ -23,15 +26,12 @@ const purchaseInvoiceSchema = new mongoose.Schema({
 
   items: [invoiceItemSchema],
   
-  // ✅ before-tax charges
   otherChargesBeforeTaxAmount: { type: Number, default: 0 },
   otherChargesBeforeTaxPercent: { type: Number, default: 0 },
-  otherChargesBeforeTaxGstRate: { type: Number, default: 0 },  // ✅ added
+  otherChargesBeforeTaxGstRate: { type: Number, default: 0 },  
 
-  // ✅ after-tax charges
   otherChargesAfterTax: { type: Number, default: 0 },
 
-  // ✅ totals
   totalTaxableValue: { type: Number },
   totalInvoiceValue: { type: Number }
 }, { timestamps: true });
@@ -40,7 +40,6 @@ purchaseInvoiceSchema.pre('save', function (next) {
   let totalTaxable = 0;
   let gstTotal = 0;
 
-  // calculate item-wise taxable and GST
   this.items.forEach(item => {
     item.amount = (item.subQuantity || 0) * (item.rate || 0);
     totalTaxable += item.amount;
@@ -50,22 +49,38 @@ purchaseInvoiceSchema.pre('save', function (next) {
     }
   });
 
-  // calculate other charges (before tax)
   const beforeTaxPercentValue =
     (totalTaxable * (this.otherChargesBeforeTaxPercent || 0)) / 100;
   const beforeTaxFixedValue = this.otherChargesBeforeTaxAmount || 0;
   const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
 
-  // ✅ GST on before-tax charges
   const beforeTaxGst =
     (beforeTaxTotal * (this.otherChargesBeforeTaxGstRate || 0)) / 100;
 
-  // ✅ store totals
   this.totalTaxableValue = totalTaxable + beforeTaxTotal;
   this.totalInvoiceValue =
     totalTaxable + beforeTaxTotal + gstTotal + beforeTaxGst + (this.otherChargesAfterTax || 0);
 
   next();
+});
+
+purchaseInvoiceSchema.post('save', async function (doc, next) {
+  try {
+    await InventoryTransaction.deleteMany({ 'meta.invoice': doc._id });
+    if (doc.items?.length) {
+      const txns = doc.items.map(it => ({
+        item: it.item,
+        type: 'PURCHASE',
+        quantity: it.subQuantity,
+        date: doc.date,
+        meta: { invoice: doc._id },
+      }));
+      await InventoryTransaction.insertMany(txns);
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = mongoose.model('PurchaseInvoice', purchaseInvoiceSchema);
