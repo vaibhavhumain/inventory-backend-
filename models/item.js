@@ -9,7 +9,11 @@ const itemSchema = new mongoose.Schema(
     unit: { type: String, default: "pcs" },
     hsnCode: { type: String },
     remarks: { type: String },
-
+    vendor : {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vendor",
+      required: false,
+    },
     closingQty: { type: Number, default: 0 },
     mainStoreQty: { type: Number, default: 0 },
     subStoreQty: { type: Number, default: 0 },
