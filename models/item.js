@@ -18,13 +18,12 @@ const categoryPrefixes = {
 const itemSchema = new mongoose.Schema(
   {
     code: { type: String, unique: true },  
-    name: { type: String, required: true },
     category: { 
       type: String, 
       enum: Object.keys(categoryPrefixes),
       required: true
     },
-    headDescription: { type: String },
+    headDescription: { type: String, required: true },  
     subDescription: { type: String },
     unit: { type: String, default: "pcs" },
     hsnCode: { type: String },

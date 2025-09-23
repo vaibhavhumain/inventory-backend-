@@ -45,30 +45,28 @@ async function processItems(items) {
   const processedItems = [];
 
   for (const it of items) {
-    const itemName = it.name || it.item || it.overrideDescription;
-    if (!itemName) throw new Error("Item name is required");
+    const headDescription = it.headDescription || it.item || it.overrideDescription;
+    if (!headDescription) throw new Error("Head Description is required");
+
+    const safeCategory = it.category?.toLowerCase().trim() || "raw material";
 
     const amount = (it.subQuantity || 0) * (it.rate || 0);
     totalTaxableValue += amount;
     if (it.gstRate) gstTotal += (amount * it.gstRate) / 100;
 
-    // normalize category
-    const safeCategory = it.category?.toLowerCase().trim() || "raw material";
-
     // find or create Item
-    let existingItem = await Item.findOne({ name: itemName });
+    let existingItem = await Item.findOne({ headDescription });
     if (!existingItem) {
       const code = await generateItemCode(safeCategory);
       existingItem = new Item({
         code,
-        name: itemName,
         category: safeCategory,
-        description: it.description,
+        headDescription,
+        subDescription: it.subDescription || "",
         unit: it.subQuantityMeasurement,
         hsnCode: it.hsnCode,
         closingQty: it.subQuantity,
         mainStoreQty: it.subQuantity,
-        subStoreQty: 0,
         remarks: it.notes || null,
         dailyStock: [
           {
@@ -98,7 +96,7 @@ async function processItems(items) {
 
     processedItems.push({
       item: existingItem._id,
-      overrideDescription: it.description,
+      overrideDescription: it.overrideDescription || headDescription,
       headQuantity: it.headQuantity,
       headQuantityMeasurement: it.headQuantityMeasurement,
       subQuantity: it.subQuantity,
@@ -173,7 +171,7 @@ exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "name code category");
+      .populate("items.item", "headDescription subDescription code category");
     res.status(200).json(invoices);
   } catch (error) {
     res.status(500).json({ error: "Server error" });
@@ -184,7 +182,7 @@ exports.getPurchaseInvoiceById = async (req, res) => {
   try {
     const invoice = await PurchaseInvoice.findById(req.params.id)
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "name code category");
+      .populate("items.item", "headDescription subDescription code category");
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.status(200).json(invoice);
   } catch (error) {
@@ -267,7 +265,7 @@ exports.getInvoiceReport = async (req, res) => {
     const invoices = await PurchaseInvoice.find(match)
       .sort({ date: 1 })
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "name code category");
+      .populate("items.item", "headDescription subDescription code category");
 
     const summary = {
       totalInvoices: invoices.length,
@@ -286,7 +284,8 @@ exports.getInvoiceReport = async (req, res) => {
             PartyName: inv.partyName,
             VendorName: inv.vendor?.name || "",
             ItemCode: it.item?.code || "",
-            ItemName: it.item?.name || "",
+            ItemHeadDescription: it.item?.headDescription || "",
+            ItemSubDescription: it.item?.subDescription || "",
             Quantity: it.subQuantity,
             Rate: it.rate,
             Amount: it.amount,
@@ -335,7 +334,7 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
     const invoices = await PurchaseInvoice.find({ "items.item": item._id })
       .sort({ date: -1 })
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "code name category");
+      .populate("items.item", "code headDescription subDescription category");
 
     if (!invoices.length) return res.status(404).json({ error: "No history found" });
 
@@ -365,7 +364,11 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
       })
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    res.json({ item: { code: item.code, name: item.name }, supplierHistory, stock: stockHistory });
+    res.json({
+      item: { code: item.code, headDescription: item.headDescription, subDescription: item.subDescription },
+      supplierHistory,
+      stock: stockHistory,
+    });
   } catch (error) {
     res.status(500).json({ error: "Server error" });
   }
