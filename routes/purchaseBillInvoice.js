@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
 const {
@@ -9,14 +9,14 @@ const {
   deletePurchaseInvoice,
   getInvoiceReport,
   getItemHistoryFromInvoices,
-} = require('../controllers/purchaseInvoiceController');
+} = require("../controllers/purchaseInvoiceController");
 
-router.post('/', createPurchaseInvoice);
-router.get('/', getPurchaseInvoices);
-router.get('/report', getInvoiceReport);
+router.post("/", createPurchaseInvoice);         
+router.get("/", getPurchaseInvoices);             
+router.get("/report", getInvoiceReport);         
 router.get("/items/:code/history", getItemHistoryFromInvoices); 
-router.get('/:id', getPurchaseInvoiceById);
-router.put('/:id', updatePurchaseInvoice);
-router.delete('/:id', deletePurchaseInvoice);
+router.get("/:id", getPurchaseInvoiceById);       
+router.put("/:id", updatePurchaseInvoice);       
+router.delete("/:id", deletePurchaseInvoice);
 
 module.exports = router;

@@ -4,8 +4,7 @@ const Item = require('./item');
 
 const invoiceItemSchema = new mongoose.Schema({
   item: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
-
-  description: { type: String },
+  overrideDescription: { type: String }, 
   headQuantity: { type: Number, required: true },
   headQuantityMeasurement: { type: String, required: true },
   subQuantity: { type: Number, required: true },
@@ -16,7 +15,8 @@ const invoiceItemSchema = new mongoose.Schema({
   gstRate: { type: Number },
   notes: { type: String }
 }, { _id: false });
- 
+
+
 const purchaseInvoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },

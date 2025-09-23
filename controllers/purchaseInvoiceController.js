@@ -1,6 +1,7 @@
-const PurchaseInvoice = require('../models/purchaseInvoice');
-const Item = require('../models/item');
-const XLSX = require('xlsx');
+const PurchaseInvoice = require("../models/purchaseInvoice");
+const Item = require("../models/item");
+const InventoryTransaction = require("../models/InventoryTransaction");
+const XLSX = require("xlsx");
 
 const categoryPrefixes = {
   "raw material": "RM",
@@ -17,6 +18,7 @@ const categoryPrefixes = {
   furniture: "FR",
 };
 
+// ---------------------- Helper: Generate Item Code ----------------------
 async function generateItemCode(category) {
   const safeCategory = category?.toLowerCase() || "raw material";
   const prefix = categoryPrefixes[safeCategory] || "ITM";
@@ -24,11 +26,6 @@ async function generateItemCode(category) {
   const lastItem = await Item.findOne({ category: safeCategory })
     .sort({ code: -1 })
     .collation({ locale: "en", numericOrdering: true });
-
-  console.log("🔹 generateItemCode");
-  console.log("   safeCategory:", safeCategory);
-  console.log("   prefix:", prefix);
-  console.log("   lastItem:", lastItem?.code);
 
   let newCode;
   if (!lastItem) {
@@ -38,11 +35,86 @@ async function generateItemCode(category) {
     const lastNum = match ? parseInt(match[1], 10) : 0;
     newCode = `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
   }
-
-  console.log("   -> newCode:", newCode);
   return newCode;
 }
-// Create purchase invoice
+
+// ---------------------- Helper: Process Items ----------------------
+async function processItems(items) {
+  let totalTaxableValue = 0;
+  let gstTotal = 0;
+  const processedItems = [];
+
+  for (const it of items) {
+    const itemName = it.name || it.item || it.overrideDescription;
+    if (!itemName) throw new Error("Item name is required");
+
+    const amount = (it.subQuantity || 0) * (it.rate || 0);
+    totalTaxableValue += amount;
+    if (it.gstRate) gstTotal += (amount * it.gstRate) / 100;
+
+    // normalize category
+    const safeCategory = it.category?.toLowerCase().trim() || "raw material";
+
+    // find or create Item
+    let existingItem = await Item.findOne({ name: itemName });
+    if (!existingItem) {
+      const code = await generateItemCode(safeCategory);
+      existingItem = new Item({
+        code,
+        name: itemName,
+        category: safeCategory,
+        description: it.description,
+        unit: it.subQuantityMeasurement,
+        hsnCode: it.hsnCode,
+        closingQty: it.subQuantity,
+        mainStoreQty: it.subQuantity,
+        subStoreQty: 0,
+        remarks: it.notes || null,
+        dailyStock: [
+          {
+            date: new Date(),
+            in: it.subQuantity,
+            out: 0,
+            closingQty: it.subQuantity,
+            mainStoreQty: it.subQuantity,
+            subStoreQty: 0,
+          },
+        ],
+      });
+      await existingItem.save();
+    } else {
+      existingItem.closingQty += it.subQuantity || 0;
+      existingItem.mainStoreQty += it.subQuantity || 0;
+      existingItem.dailyStock.push({
+        date: new Date(),
+        in: it.subQuantity || 0,
+        out: 0,
+        closingQty: existingItem.closingQty,
+        mainStoreQty: existingItem.mainStoreQty,
+        subStoreQty: existingItem.subStoreQty || 0,
+      });
+      await existingItem.save();
+    }
+
+    processedItems.push({
+      item: existingItem._id,
+      overrideDescription: it.description,
+      headQuantity: it.headQuantity,
+      headQuantityMeasurement: it.headQuantityMeasurement,
+      subQuantity: it.subQuantity,
+      subQuantityMeasurement: it.subQuantityMeasurement,
+      hsnCode: it.hsnCode,
+      rate: it.rate,
+      amount,
+      gstRate: it.gstRate,
+      notes: it.notes,
+    });
+  }
+
+  return { processedItems, totalTaxableValue, gstTotal };
+}
+
+// ---------------------- Create Purchase Invoice ----------------------
 exports.createPurchaseInvoice = async (req, res) => {
   try {
     const {
@@ -57,107 +129,23 @@ exports.createPurchaseInvoice = async (req, res) => {
       otherChargesAfterTax,
     } = req.body;
 
-    // Validation
     if (!invoiceNumber || !partyName || !vendor || !items?.length) {
-      return res.status(400).json({
-        error: "Invoice number, vendor, party name and at least one item are required",
-      });
+      return res
+        .status(400)
+        .json({ error: "Invoice number, vendor, party name and items are required" });
     }
 
-    let totalTaxableValue = 0;
-    let gstTotal = 0;
-    const processedItems = [];
+    const { processedItems, totalTaxableValue, gstTotal } = await processItems(items);
 
-    for (const it of items) {
-      // Allow name from either frontend `name`, `item`, or `description`
-      const itemName = it.name || it.item || it.description;
-      if (!itemName) {
-        return res.status(400).json({ error: "Item name is required for new items" });
-      }
-
-      // 🔹 Calculate amount
-      const amount = (it.subQuantity || 0) * (it.rate || 0);
-      totalTaxableValue += amount;
-
-      if (it.gstRate) {
-        gstTotal += (amount * it.gstRate) / 100;
-      }
-
-      // 🔹 Check if item already exists
-      let existingItem = await Item.findOne({ name: itemName });
-
-      // 🔹 If not exists, create new Item
-      if (!existingItem) {
-        const code = await generateItemCode(it.category || "raw material");
-
-        existingItem = new Item({
-          code,
-          name: itemName,
-          category: it.category || "raw material",
-          description: it.description,
-          unit: it.subQuantityMeasurement,
-          hsnCode: it.hsnCode,
-          closingQty: it.subQuantity,
-          mainStoreQty: it.subQuantity,
-          subStoreQty: 0,
-          remarks: it.notes || null,
-          dailyStock: [
-            {
-              date: new Date(),
-              in: it.subQuantity,
-              out: 0,
-              closingQty: it.subQuantity,
-              mainStoreQty: it.subQuantity,
-              subStoreQty: 0,
-            },
-          ],
-        });
-
-        await existingItem.save();
-      } else {
-        // 🔹 Update stock if item exists
-        existingItem.closingQty += (it.subQuantity || 0);
-        existingItem.mainStoreQty += (it.subQuantity || 0);
-
-        existingItem.dailyStock.push({
-          date: new Date(),
-          in: it.subQuantity || 0,
-          out: 0,
-          closingQty: existingItem.closingQty,
-          mainStoreQty: existingItem.mainStoreQty,
-          subStoreQty: existingItem.subStoreQty || 0,
-        });
-
-        await existingItem.save();
-      }
-
-      // 🔹 Add processed item for invoice
-      processedItems.push({
-        item: existingItem._id,
-        description: it.description,
-        headQuantity: it.headQuantity,
-        headQuantityMeasurement: it.headQuantityMeasurement,
-        subQuantity: it.subQuantity,
-        subQuantityMeasurement: it.subQuantityMeasurement,
-        hsnCode: it.hsnCode,
-        rate: it.rate,
-        amount,
-        gstRate: it.gstRate,
-        notes: it.notes,
-      });
-    }
-
-    // 🔹 Calculate totals
-    const beforeTaxPercentValue = (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    const beforeTaxPercentValue =
+      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
     const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
-
     const beforeTaxGst = (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
 
     const totalInvoiceValue =
       totalTaxableValue + beforeTaxTotal + gstTotal + beforeTaxGst + (otherChargesAfterTax || 0);
 
-    // 🔹 Create invoice
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
       date: date || new Date(),
@@ -173,174 +161,194 @@ exports.createPurchaseInvoice = async (req, res) => {
     });
 
     await newInvoice.save();
-
-    res.status(201).json({
-      message: "Purchase Invoice Added Successfully",
-      invoice: newInvoice,
-    });
+    res.status(201).json({ message: "Purchase Invoice Added", invoice: newInvoice });
   } catch (error) {
     console.error("Error adding purchase invoice:", error);
     res.status(500).json({ error: error.message });
   }
 };
 
-
-// Get all invoices
+// ---------------------- Get Invoices ----------------------
 exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
-      .populate('vendor', 'code name gstNumber')
-      .populate('items.item', 'name code category'); // 🔹 ensure item names are returned
-
+      .populate("vendor", "code name gstNumber")
+      .populate("items.item", "name code category");
     res.status(200).json(invoices);
   } catch (error) {
-    console.error('Error fetching invoices:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: "Server error" });
   }
 };
 
-// Get invoice by ID
 exports.getPurchaseInvoiceById = async (req, res) => {
   try {
     const invoice = await PurchaseInvoice.findById(req.params.id)
-      .populate('vendor', 'code name gstNumber')
-      .populate('items.item', 'name code'); 
-    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+      .populate("vendor", "code name gstNumber")
+      .populate("items.item", "name code category");
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.status(200).json(invoice);
   } catch (error) {
-    console.error('Error fetching invoice:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: "Server error" });
   }
 };
 
-// Update invoice
+// ---------------------- Update Invoice ----------------------
 exports.updatePurchaseInvoice = async (req, res) => {
   try {
-    const updatedInvoice = await PurchaseInvoice.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    ).populate('vendor', 'code name gstNumber');
+    const invoice = await PurchaseInvoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
 
-    if (!updatedInvoice)
-      return res.status(404).json({ error: 'Invoice not found' });
+    const {
+      items,
+      otherChargesBeforeTaxAmount,
+      otherChargesBeforeTaxPercent,
+      otherChargesBeforeTaxGstRate,
+      otherChargesAfterTax,
+      ...rest
+    } = req.body;
 
-    res.status(200).json({
-      message: 'Purchase Invoice Updated',
-      invoice: updatedInvoice,
+    let processedItems = invoice.items;
+    let totalTaxableValue = invoice.totalTaxableValue;
+    let gstTotal = 0;
+
+    if (items?.length) {
+      const processed = await processItems(items);
+      processedItems = processed.processedItems;
+      totalTaxableValue = processed.totalTaxableValue;
+      gstTotal = processed.gstTotal;
+    }
+
+    const beforeTaxPercentValue =
+      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
+    const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
+    const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
+    const beforeTaxGst = (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
+
+    const totalInvoiceValue =
+      totalTaxableValue + beforeTaxTotal + gstTotal + beforeTaxGst + (otherChargesAfterTax || 0);
+
+    invoice.set({
+      ...rest,
+      items: processedItems,
+      otherChargesBeforeTaxAmount: beforeTaxFixedValue,
+      otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
+      otherChargesBeforeTaxGstRate: otherChargesBeforeTaxGstRate || 0,
+      otherChargesAfterTax: otherChargesAfterTax || 0,
+      totalTaxableValue: totalTaxableValue + beforeTaxTotal,
+      totalInvoiceValue,
     });
+
+    await invoice.save();
+    res.status(200).json({ message: "Purchase Invoice Updated", invoice });
   } catch (error) {
-    console.error('Error updating invoice:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error("Error updating invoice:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 
-// Delete invoice
+// ---------------------- Delete Invoice ----------------------
 exports.deletePurchaseInvoice = async (req, res) => {
   try {
-    const deletedInvoice = await PurchaseInvoice.findByIdAndDelete(
-      req.params.id
-    );
-    if (!deletedInvoice)
-      return res.status(404).json({ error: 'Invoice not found' });
-    res.status(200).json({ message: 'Purchase Invoice Deleted' });
+    const deletedInvoice = await PurchaseInvoice.findByIdAndDelete(req.params.id);
+    if (!deletedInvoice) return res.status(404).json({ error: "Invoice not found" });
+    res.status(200).json({ message: "Purchase Invoice Deleted" });
   } catch (error) {
-    console.error('Error deleting invoice:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: "Server error" });
   }
 };
 
-// Generate report (JSON or Excel)
+// ---------------------- Report ----------------------
 exports.getInvoiceReport = async (req, res) => {
   try {
-    const { from, to, format } = req.query;
-
+    const { from, to, format, level } = req.query;
     const match = {};
-    if (from && to) {
-      match.date = { $gte: new Date(from), $lte: new Date(to) };
-    }
+    if (from && to) match.date = { $gte: new Date(from), $lte: new Date(to) };
 
     const invoices = await PurchaseInvoice.find(match)
       .sort({ date: 1 })
-      .populate('vendor', 'code name gstNumber');
+      .populate("vendor", "code name gstNumber")
+      .populate("items.item", "name code category");
 
     const summary = {
       totalInvoices: invoices.length,
-      totalTaxableValue: invoices.reduce(
-        (sum, inv) => sum + (inv.totalTaxableValue || 0),
-        0
-      ),
-      totalInvoiceValue: invoices.reduce(
-        (sum, inv) => sum + (inv.totalInvoiceValue || 0),
-        0
-      ),
+      totalTaxableValue: invoices.reduce((sum, inv) => sum + (inv.totalTaxableValue || 0), 0),
+      totalInvoiceValue: invoices.reduce((sum, inv) => sum + (inv.totalInvoiceValue || 0), 0),
     };
 
-    if (format === 'excel') {
-      const data = invoices.map((inv) => ({
-        InvoiceNumber: inv.invoiceNumber,
-        Date: inv.date.toISOString().split('T')[0],
-        PartyName: inv.partyName,
-        VendorCode: inv.vendor?.code || '',
-        VendorName: inv.vendor?.name || '',
-        TotalTaxableValue: inv.totalTaxableValue,
-        TotalInvoiceValue: inv.totalInvoiceValue,
-      }));
+    if (format === "excel") {
+      let data;
+      if (level === "item") {
+        // item-level breakdown
+        data = invoices.flatMap((inv) =>
+          inv.items.map((it) => ({
+            InvoiceNumber: inv.invoiceNumber,
+            Date: inv.date.toISOString().split("T")[0],
+            PartyName: inv.partyName,
+            VendorName: inv.vendor?.name || "",
+            ItemCode: it.item?.code || "",
+            ItemName: it.item?.name || "",
+            Quantity: it.subQuantity,
+            Rate: it.rate,
+            Amount: it.amount,
+            GST: it.gstRate,
+          }))
+        );
+      } else {
+        // invoice-level
+        data = invoices.map((inv) => ({
+          InvoiceNumber: inv.invoiceNumber,
+          Date: inv.date.toISOString().split("T")[0],
+          PartyName: inv.partyName,
+          VendorCode: inv.vendor?.code || "",
+          VendorName: inv.vendor?.name || "",
+          TotalTaxableValue: inv.totalTaxableValue,
+          TotalInvoiceValue: inv.totalInvoiceValue,
+        }));
+      }
 
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+      const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
+      res.setHeader("Content-Disposition", "attachment; filename=InvoiceReport.xlsx");
       res.setHeader(
-        'Content-Disposition',
-        'attachment; filename=InvoiceReport.xlsx'
-      );
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
       return res.send(buffer);
     }
 
     res.status(200).json({ summary, invoices });
   } catch (error) {
-    console.error('Error generating report:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: "Server error" });
   }
 };
 
-// Get item history (from purchase invoices)
+// ---------------------- Item History ----------------------
 exports.getItemHistoryFromInvoices = async (req, res) => {
   try {
     const { code } = req.params;
-
-    // 🔹 Find the Item by code
     const item = await Item.findOne({ code });
-    if (!item) {
-      return res.status(404).json({ error: "Item not found" });
-    }
+    if (!item) return res.status(404).json({ error: "Item not found" });
 
-    // 🔹 Now use item._id to search invoices
-    const invoices = await PurchaseInvoice.find({ 'items.item': item._id })
+    const invoices = await PurchaseInvoice.find({ "items.item": item._id })
       .sort({ date: -1 })
-      .populate('vendor', 'code name gstNumber')
-      .populate('items.item', 'code name category'); // optional: populate item info
+      .populate("vendor", "code name gstNumber")
+      .populate("items.item", "code name category");
 
-    if (!invoices.length) {
-      return res.status(404).json({ error: "No history found for this item" });
-    }
+    if (!invoices.length) return res.status(404).json({ error: "No history found" });
 
     const supplierHistory = invoices.flatMap((inv) =>
       inv.items
-        .filter((it) => String(it.item._id) === String(item._id))
+        .filter((it) => String(it.item?._id) === String(item._id))
         .map((it) => ({
           date: inv.date,
           invoiceNumber: inv.invoiceNumber,
           supplierName: inv.partyName,
-          vendorCode: inv.vendor?.code || '',
-          vendorName: inv.vendor?.name || '',
-          description: it.description,
+          vendorCode: inv.vendor?.code || "",
+          vendorName: inv.vendor?.name || "",
+          description: it.overrideDescription,
           hsnCode: it.hsnCode,
           quantity: it.subQuantity,
           rate: it.rate,
@@ -353,22 +361,12 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
     const stockHistory = supplierHistory
       .map((s) => {
         closingQty += s.quantity || 0;
-        return {
-          date: s.date,
-          in: s.quantity || 0,
-          out: 0,
-          closingQty,
-        };
+        return { date: s.date, in: s.quantity || 0, out: 0, closingQty };
       })
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    res.json({
-      item: { code: item.code, name: item.name },
-      supplierHistory,
-      stock: stockHistory,
-    });
+    res.json({ item: { code: item.code, name: item.name }, supplierHistory, stock: stockHistory });
   } catch (error) {
-    console.error("Error fetching item history:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
