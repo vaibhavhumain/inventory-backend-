@@ -18,7 +18,7 @@ const issueBillSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ['MAIN_TO_SUB', 'SUB_TO_USER'],
+      enum: ['MAIN_TO_SUB', 'SUB_TO_USER', 'SUB_TO_SALE'], // ✅ Added SUB_TO_SALE
       required: true,
     },
 
@@ -26,12 +26,12 @@ const issueBillSchema = new mongoose.Schema(
       type: String,
       validate: {
         validator: function (v) {
-          if (this.type === 'SUB_TO_USER') {
+          if (['SUB_TO_USER', 'SUB_TO_SALE'].includes(this.type)) {
             return v && v.trim().length > 0;
           }
           return true;
         },
-        message: 'issuedTo is required when type is SUB_TO_USER',
+        message: 'issuedTo is required when type is SUB_TO_USER or SUB_TO_SALE',
       },
     },
 
@@ -61,7 +61,8 @@ issueBillSchema.post('save', async function (doc, next) {
     for (const it of doc.items) {
       let txnType;
       if (doc.type === 'MAIN_TO_SUB') txnType = 'ISSUE_TO_SUB';
-      if (doc.type === 'SUB_TO_USER') txnType = 'CONSUMPTION'; // or SALE depending on your flow
+      if (doc.type === 'SUB_TO_USER') txnType = 'CONSUMPTION';
+      if (doc.type === 'SUB_TO_SALE') txnType = 'SALE'; // ✅ new case
 
       if (txnType) {
         await InventoryTransaction.create({

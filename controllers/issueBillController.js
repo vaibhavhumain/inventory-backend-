@@ -11,7 +11,8 @@ exports.createIssueBill = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (!['MAIN_TO_SUB', 'SUB_TO_USER'].includes(type)) {
+    // ✅ Allow 3 types now
+    if (!['MAIN_TO_SUB', 'SUB_TO_USER', 'SUB_TO_SALE'].includes(type)) {
       return res.status(400).json({ error: "Invalid issue type" });
     }
 
@@ -20,7 +21,9 @@ exports.createIssueBill = async (req, res) => {
 
     for (const it of items) {
       const dbItem = await Item.findById(it.item);
-      if (!dbItem) return res.status(400).json({ error: `Item ${it.item} not found` });
+      if (!dbItem) {
+        return res.status(400).json({ error: `Item ${it.item} not found` });
+      }
 
       // ✅ Stock validation + update
       if (type === 'MAIN_TO_SUB') {
@@ -29,7 +32,14 @@ exports.createIssueBill = async (req, res) => {
         }
         dbItem.mainStoreQty -= it.quantity;
         dbItem.subStoreQty += it.quantity;
-      } else if (type === 'SUB_TO_USER') {
+      } 
+      else if (type === 'SUB_TO_USER') {
+        if (dbItem.subStoreQty < it.quantity) {
+          return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.name}` });
+        }
+        dbItem.subStoreQty -= it.quantity;
+      } 
+      else if (type === 'SUB_TO_SALE') {
         if (dbItem.subStoreQty < it.quantity) {
           return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.name}` });
         }
@@ -54,11 +64,17 @@ exports.createIssueBill = async (req, res) => {
       // ✅ Create Inventory Transaction
       await InventoryTransaction.create({
         item: dbItem._id,
-        type: type === 'MAIN_TO_SUB' ? 'ISSUE_TO_SUB' : 'CONSUMPTION', // if SUB_TO_USER we treat as consumption
+        type:
+          type === 'MAIN_TO_SUB'
+            ? 'ISSUE_TO_SUB'
+            : type === 'SUB_TO_USER'
+            ? 'CONSUMPTION'
+            : 'SALE', // new
         quantity: it.quantity,
         date: issueDate || new Date(),
         meta: {
           note: `Issued by ${issuedBy || 'N/A'} to ${issuedTo || department}`,
+          customer: type === 'SUB_TO_SALE' ? issuedTo : undefined,
         },
       });
 
@@ -74,11 +90,12 @@ exports.createIssueBill = async (req, res) => {
       });
     }
 
+    // ✅ Save Issue Bill
     const newBill = new IssueBill({
       issueDate,
       department,
       type,
-      issuedTo: type === 'SUB_TO_USER' ? issuedTo : undefined,
+      issuedTo: ['SUB_TO_USER', 'SUB_TO_SALE'].includes(type) ? issuedTo : undefined,
       items: processedItems,
       totalAmount,
       issuedBy,
@@ -118,9 +135,12 @@ exports.getIssueBills = async (req, res) => {
 exports.getIssueBillById = async (req, res) => {
   try {
     const bill = await IssueBill.findById(req.params.id).populate("items.item");
-    if (!bill) return res.status(404).json({ error: "Issue Bill not found" });
+    if (!bill) {
+      return res.status(404).json({ error: "Issue Bill not found" });
+    }
     res.status(200).json(bill);
   } catch (error) {
+    console.error("Error fetching bill by ID:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
