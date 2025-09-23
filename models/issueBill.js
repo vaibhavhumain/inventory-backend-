@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const InventoryTransaction = require('./InventoryTransaction');
 
 const billItemSchema = new mongoose.Schema(
   {
@@ -18,7 +17,7 @@ const issueBillSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ['MAIN_TO_SUB', 'SUB_TO_USER', 'SUB_TO_SALE'], // ✅ Added SUB_TO_SALE
+      enum: ['MAIN_TO_SUB', 'SUB_TO_USER', 'SUB_TO_SALE'],
       required: true,
     },
 
@@ -42,42 +41,12 @@ const issueBillSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/**
- * 🔹 Pre-save hook to auto-calc amounts
- */
 issueBillSchema.pre('save', function (next) {
   this.items.forEach((it) => {
     it.amount = it.quantity * (it.rate || 0);
   });
   this.totalAmount = this.items.reduce((sum, it) => sum + it.amount, 0);
   next();
-});
-
-/**
- * 🔹 Post-save hook to log Inventory Transactions
- */
-issueBillSchema.post('save', async function (doc, next) {
-  try {
-    for (const it of doc.items) {
-      let txnType;
-      if (doc.type === 'MAIN_TO_SUB') txnType = 'ISSUE_TO_SUB';
-      if (doc.type === 'SUB_TO_USER') txnType = 'CONSUMPTION';
-      if (doc.type === 'SUB_TO_SALE') txnType = 'SALE'; // ✅ new case
-
-      if (txnType) {
-        await InventoryTransaction.create({
-          item: it.item,
-          type: txnType,
-          quantity: it.quantity,
-          date: doc.issueDate,
-        });
-      }
-    }
-    next();
-  } catch (err) {
-    console.error('Error logging inventory transaction:', err);
-    next(err);
-  }
 });
 
 module.exports = mongoose.model('IssueBill', issueBillSchema);
