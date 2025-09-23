@@ -2,9 +2,29 @@ const Item = require('../models/item');
 
 exports.createItem = async (req, res) => {
   try {
-    const item = await Item.create(req.body);
-    res.status(201).json(item);
+    const { category, headDescription, subDescription, unit, hsnCode, remarks, vendor } = req.body;
+
+    if (!headDescription) {
+      return res.status(400).json({ error: "headDescription is required" });
+    }
+    if (!category) {
+      return res.status(400).json({ error: "category is required" });
+    }
+
+    const newItem = new Item({
+      category,
+      headDescription,
+      subDescription,
+      unit: unit || "pcs",
+      hsnCode,
+      remarks,
+      vendor
+    });
+
+    await newItem.save();
+    res.status(201).json(newItem);
   } catch (err) {
+    console.error("Error creating item:", err);
     res.status(400).json({ error: err.message });
   }
 };
