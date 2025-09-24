@@ -1,8 +1,8 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const billItemSchema = new mongoose.Schema(
   {
-    item: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
+    item: { type: mongoose.Schema.Types.ObjectId, ref: "Item", required: true },
     quantity: { type: Number, required: true },
     rate: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
@@ -17,7 +17,7 @@ const issueBillSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ['MAIN_TO_SUB', 'SUB_TO_USER', 'SUB_TO_SALE'],
+      enum: ["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE"],
       required: true,
     },
 
@@ -25,23 +25,26 @@ const issueBillSchema = new mongoose.Schema(
       type: String,
       validate: {
         validator: function (v) {
-          if (['SUB_TO_USER', 'SUB_TO_SALE'].includes(this.type)) {
+          if (["SUB_TO_USER", "SUB_TO_SALE"].includes(this.type)) {
             return v && v.trim().length > 0;
           }
           return true;
         },
-        message: 'issuedTo is required when type is SUB_TO_USER or SUB_TO_SALE',
+        message:
+          "issuedTo is required when type is SUB_TO_USER or SUB_TO_SALE",
       },
     },
 
     items: [billItemSchema],
     totalAmount: { type: Number, default: 0 },
     issuedBy: { type: String },
+    bus: { type: mongoose.Schema.Types.ObjectId, ref: "Bus" },
   },
   { timestamps: true }
 );
 
-issueBillSchema.pre('save', function (next) {
+// Calculate item amounts and total
+issueBillSchema.pre("save", function (next) {
   this.items.forEach((it) => {
     it.amount = it.quantity * (it.rate || 0);
   });
@@ -49,4 +52,4 @@ issueBillSchema.pre('save', function (next) {
   next();
 });
 
-module.exports = mongoose.model('IssueBill', issueBillSchema);
+module.exports = mongoose.model("IssueBill", issueBillSchema);

@@ -14,6 +14,7 @@ const adminRoutes = require('./routes/admin');
 const vendorRoutes = require('./routes/vendorRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const stockRoutes2 = require('./routes/stockRoutes');
+const busConsumptionRoutes = require('./routes/busConsumptionRoutes');
 connectDB();
 
 const app = express();
@@ -41,6 +42,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/stock', stockRoutes2);
+app.use('/api/bus-consumption', busConsumptionRoutes);
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();
@@ -58,3 +60,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
+ 
