@@ -14,7 +14,7 @@ const adminRoutes = require('./routes/admin');
 const vendorRoutes = require('./routes/vendorRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const stockRoutes2 = require('./routes/stockRoutes');
-const busConsumptionRoutes = require('./routes/busConsumptionRoutes');
+const busConsumptionRoutes = require('./routes/busConsumptionRoute');
 connectDB();
 
 const app = express();
