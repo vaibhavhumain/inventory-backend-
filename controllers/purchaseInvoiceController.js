@@ -171,7 +171,7 @@ exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "headDescription subDescription code category");
+      .populate("items.item", "_id code headDescription subDescription category");
     res.status(200).json(invoices);
   } catch (error) {
     res.status(500).json({ error: "Server error" });
@@ -182,7 +182,7 @@ exports.getPurchaseInvoiceById = async (req, res) => {
   try {
     const invoice = await PurchaseInvoice.findById(req.params.id)
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "headDescription subDescription code category");
+      .populate("items.item", "_id code headDescription subDescription category");
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.status(200).json(invoice);
   } catch (error) {
@@ -265,7 +265,7 @@ exports.getInvoiceReport = async (req, res) => {
     const invoices = await PurchaseInvoice.find(match)
       .sort({ date: 1 })
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "headDescription subDescription code category");
+      .populate("items.item", "_id code headDescription subDescription category");
 
     const summary = {
       totalInvoices: invoices.length,
