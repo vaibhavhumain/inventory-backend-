@@ -51,7 +51,6 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
-
 exports.getItemOverview = async (req, res) => {
   try {
     const { id } = req.params;
@@ -60,7 +59,7 @@ exports.getItemOverview = async (req, res) => {
     const item = await Item.findById(id).populate("vendor");
     if (!item) return res.status(404).json({ error: "Item not found" });
 
-    // 2. Purchases grouped by vendor
+    // 2. Purchases grouped by vendor (summary)
     const purchaseAgg = await PurchaseInvoice.aggregate([
       { $unwind: "$items" },
       { $match: { "items.item": new mongoose.Types.ObjectId(id) } },
@@ -97,7 +96,7 @@ exports.getItemOverview = async (req, res) => {
     });
     const currentStock = purchased - consumed;
 
-    // 4. Bus consumption breakdown
+    // 4. Bus consumption breakdown (summary)
     const busAgg = await InventoryTransaction.aggregate([
       {
         $match: {
@@ -117,6 +116,24 @@ exports.getItemOverview = async (req, res) => {
       _id: { $in: busAgg.map((b) => b._id) },
     });
 
+    // 5. Full purchase history (detailed)
+    const purchaseHistory = await PurchaseInvoice.find({
+      "items.item": id,
+    })
+      .sort({ date: -1 })
+      .populate("vendor", "name code")
+      .lean();
+
+    // 6. Full consumption history (detailed)
+    const consumptionHistory = await InventoryTransaction.find({
+      item: id,
+      type: "CONSUMPTION",
+    })
+      .sort({ date: -1 })
+      .populate("meta.bus", "busCode busName")
+      .lean();
+
+    // Final Response
     res.json({
       item,
       vendors: purchaseAgg.map((pa) => ({
@@ -134,6 +151,8 @@ exports.getItemOverview = async (req, res) => {
         bus: buses.find((b) => b._id.equals(bc._id)),
         totalConsumed: bc.totalConsumed,
       })),
+      purchaseHistory,      // 👈 full purchases
+      consumptionHistory,   // 👈 full consumptions
     });
   } catch (err) {
     console.error("Error in getItemOverview:", err);
