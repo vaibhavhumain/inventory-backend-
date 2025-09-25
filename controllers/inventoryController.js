@@ -23,20 +23,27 @@ exports.issueToSub = async (req, res) => {
 exports.consumeFromSub = async (req, res) => {
   try {
     const { itemId, quantity, date, busId, note } = req.body;
-    await ensureSufficientStock(itemId, 'CONSUMPTION', Number(quantity));
+
+    await ensureSufficientStock(itemId, "CONSUMPTION", Number(quantity));
+
     const txn = await InventoryTransaction.create({
       item: itemId,
-      type: 'CONSUMPTION',
+      type: "CONSUMPTION",
       quantity,
       date: date || new Date(),
-      meta: { bus: busId, note },
+      meta: {
+        bus: busId || null,   
+        note: note || null, 
+      },
     });
+
     const summary = await getItemSummary(itemId);
     res.status(201).json({ ok: true, txn, summary });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
 };
+
 
 exports.sellFromSub = async (req, res) => {
   try {
