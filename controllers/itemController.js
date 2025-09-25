@@ -174,3 +174,75 @@ exports.getItemOverview = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getItemLedger = async (req, res) => {
+  try {
+    const { id } = req.params; // itemId
+    const item = await Item.findById(id);
+    if (!item) return res.status(404).json({ error: "Item not found" });
+
+    // Fetch all transactions
+    const txns = await InventoryTransaction.find({ item: id })
+      .sort({ date: 1 })
+      .lean();
+
+    if (!txns.length) return res.json({ item, ledger: [] });
+
+    // Group by day
+    const byDay = {};
+    txns.forEach(t => {
+      const d = new Date(t.date).toISOString().split("T")[0];
+      if (!byDay[d]) {
+        byDay[d] = { purchase: 0, issue: 0, consumption: 0, sale: 0 };
+      }
+      if (t.type === "PURCHASE") byDay[d].purchase += t.quantity;
+      if (t.type === "ISSUE_TO_SUB") byDay[d].issue += t.quantity;
+      if (t.type === "CONSUMPTION") byDay[d].consumption += t.quantity;
+      if (t.type === "SALE") byDay[d].sale += t.quantity;
+    });
+
+    // Walk through days chronologically
+    const dates = Object.keys(byDay).sort();
+    let openingMain = 0;
+    let openingSub = 0;
+    const ledger = [];
+
+    for (const d of dates) {
+      const row = byDay[d];
+
+      const openingTotal = openingMain + openingSub;
+
+      const purchase = row.purchase || 0;
+      const issue = row.issue || 0;
+      const consumption = row.consumption || 0;
+      const sale = row.sale || 0;
+
+      let main = openingMain + purchase - issue;
+      let sub = openingSub + issue - (consumption + sale);
+
+      const closingTotal = main + sub;
+
+      ledger.push({
+        date: d,
+        openingMain,
+        openingSub,
+        openingTotal,
+        purchase,
+        issue,
+        consumption,
+        sale,
+        balanceMain: main,
+        balanceSub: sub,
+        closingTotal,
+      });
+
+      openingMain = main;
+      openingSub = sub;
+    }
+
+    res.json({ item, ledger });
+  } catch (err) {
+    console.error("Error in getItemLedger:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
