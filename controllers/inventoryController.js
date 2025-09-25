@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const InventoryTransaction = require('../models/InventoryTransaction');
 const { ensureSufficientStock, getAllItemsSummary, getItemSummary } = require('../services/Stock');
-const Bus = require('../models/Bus');
+const Bus = require('../models/BusConsumption');
 
 exports.issueToSub = async (req, res) => {
   try {
