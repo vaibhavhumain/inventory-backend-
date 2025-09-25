@@ -3,7 +3,7 @@ const Item = require("../models/item");
 const Vendor = require("../models/vendor");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const PurchaseInvoice = require("../models/purchaseInvoice");
-const Bus = require("../models/BusConsumption");
+const Bus = require("../models/Bus");
 exports.createItem = async (req, res) => {
   try {
     const { category, headDescription, subDescription, unit, hsnCode, remarks, vendor } = req.body;

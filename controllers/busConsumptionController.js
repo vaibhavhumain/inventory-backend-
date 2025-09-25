@@ -1,4 +1,4 @@
-const BusConsumption = require('../models/BusConsumption');
+const BusConsumption = require('../models/Bus');
 const IssueBill = require('../models/issueBill');
 
 // Create bus consumption (only allowed for SUB_TO_USER issue bills)

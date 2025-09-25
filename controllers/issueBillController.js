@@ -1,7 +1,7 @@
 const IssueBill = require("../models/issueBill");
 const Item = require("../models/item");
 const InventoryTransaction = require("../models/InventoryTransaction");
-const Bus = require("../models/BusConsumption");
+const Bus = require("../models/Bus");
 
 // ✅ Create Issue Bill
 exports.createIssueBill = async (req, res) => {
