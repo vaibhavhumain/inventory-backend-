@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Item = require("../models/item");
 const Vendor = require("../models/vendor");
 const InventoryTransaction = require("../models/InventoryTransaction");
-const PurchaseInvoice = require("../models/PurchaseInvoice");
+const PurchaseInvoice = require("../models/purchaseInvoice");
 const Bus = require("../models/Bus");
 exports.createItem = async (req, res) => {
   try {
