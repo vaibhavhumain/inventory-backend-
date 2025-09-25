@@ -75,7 +75,7 @@ exports.getItemOverview = async (req, res) => {
 
     const vendors = await Vendor.find({
       _id: { $in: purchaseAgg.map((p) => p._id) },
-    });
+    }).lean();
 
     // 3. Stock from transactions
     const txns = await InventoryTransaction.aggregate([
@@ -112,8 +112,19 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
+    // fetch full bus documents
     const buses = await Bus.find({
       _id: { $in: busAgg.map((b) => b._id) },
+    }).lean();
+
+    const consumptionSummary = busAgg.map((bc) => {
+      const busDoc = buses.find((b) => b._id.toString() === bc._id.toString());
+      return {
+        bus: busDoc
+          ? { _id: busDoc._id, busCode: busDoc.busCode, busName: busDoc.busName }
+          : null,
+        totalConsumed: bc.totalConsumed,
+      };
     });
 
     // 5. Full purchase history (detailed)
@@ -122,6 +133,7 @@ exports.getItemOverview = async (req, res) => {
     })
       .sort({ date: -1 })
       .populate("vendor", "name code")
+      .populate("items.item", "code headDescription subDescription unit")
       .lean();
 
     // 6. Full consumption history (detailed)
@@ -147,12 +159,9 @@ exports.getItemOverview = async (req, res) => {
         consumed,
         currentStock,
       },
-      consumption: busAgg.map((bc) => ({
-        bus: buses.find((b) => b._id.equals(bc._id)),
-        totalConsumed: bc.totalConsumed,
-      })),
-      purchaseHistory,      // 👈 full purchases
-      consumptionHistory,   // 👈 full consumptions
+      consumption: consumptionSummary, 
+      purchaseHistory,                 
+      consumptionHistory,              
     });
   } catch (err) {
     console.error("Error in getItemOverview:", err);
