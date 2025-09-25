@@ -118,10 +118,16 @@ exports.getItemOverview = async (req, res) => {
     }).lean();
 
     const consumptionSummary = busAgg.map((bc) => {
-      const busDoc = buses.find((b) => b._id.toString() === bc._id.toString());
+      const busDoc = buses.find((b) => b._id.toString() === bc._id?.toString());
       return {
         bus: busDoc
-          ? { _id: busDoc._id, busCode: busDoc.busCode, busName: busDoc.busName }
+          ? {
+              _id: busDoc._id,
+              busCode: busDoc.busCode,
+              model: busDoc.model,
+              chassisNumber: busDoc.chassisNumber,
+              engineNumber: busDoc.engineNumber,
+            }
           : null,
         totalConsumed: bc.totalConsumed,
       };
@@ -142,7 +148,7 @@ exports.getItemOverview = async (req, res) => {
       type: "CONSUMPTION",
     })
       .sort({ date: -1 })
-      .populate("meta.bus", "busCode busName")
+      .populate("meta.bus", "busCode model chassisNumber engineNumber")
       .lean();
 
     // Final Response
@@ -159,9 +165,9 @@ exports.getItemOverview = async (req, res) => {
         consumed,
         currentStock,
       },
-      consumption: consumptionSummary, 
-      purchaseHistory,                 
-      consumptionHistory,              
+      consumption: consumptionSummary,
+      purchaseHistory,
+      consumptionHistory,
     });
   } catch (err) {
     console.error("Error in getItemOverview:", err);
