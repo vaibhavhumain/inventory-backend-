@@ -112,63 +112,47 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
-    // fetch full bus documents
-    const buses = await Bus.find({
-      _id: { $in: busAgg.map((b) => b._id) },
-    }).lean();
+   // 5. Full purchase history (detailed)
+const purchaseHistory = await PurchaseInvoice.find({
+  "items.item": id,
+})
+  .sort({ date: -1 })
+  .populate("vendor", "name code")
+  .populate("items.item", "code headDescription subDescription unit")
+  .lean();
 
-    const consumptionSummary = busAgg.map((bc) => {
-      const busDoc = buses.find((b) => b._id.toString() === bc._id?.toString());
-      return {
-        bus: busDoc
-          ? {
-              _id: busDoc._id,
-              busCode: busDoc.busCode,
-              model: busDoc.model,
-              chassisNumber: busDoc.chassisNumber,
-              engineNumber: busDoc.engineNumber,
-            }
-          : null,
-        totalConsumed: bc.totalConsumed,
-      };
-    });
+// Pick latest invoice hsnCode if available
+let latestHsnCode = null;
+if (purchaseHistory.length > 0) {
+  const latestInvoice = purchaseHistory[0];
+  const line = latestInvoice.items.find(it => it.item._id.toString() === id);
+  if (line?.hsnCode) {
+    latestHsnCode = line.hsnCode;
+  }
+}
 
-    // 5. Full purchase history (detailed)
-    const purchaseHistory = await PurchaseInvoice.find({
-      "items.item": id,
-    })
-      .sort({ date: -1 })
-      .populate("vendor", "name code")
-      .populate("items.item", "code headDescription subDescription unit")
-      .lean();
+// Final Response
+res.json({
+  item: {
+    ...item.toObject?.() || item,
+    hsnCode: latestHsnCode, // 🔑 override from latest invoice
+  },
+  vendors: purchaseAgg.map((pa) => ({
+    vendor: vendors.find((v) => v._id.equals(pa._id)),
+    totalPurchased: pa.totalPurchased,
+    avgRate: pa.avgRate,
+    lastPurchaseDate: pa.lastPurchaseDate,
+  })),
+  stock: {
+    purchased,
+    consumed,
+    currentStock,
+  },
+  consumption: consumptionSummary,
+  purchaseHistory,
+  consumptionHistory,
+});
 
-    // 6. Full consumption history (detailed)
-    const consumptionHistory = await InventoryTransaction.find({
-      item: id,
-      type: "CONSUMPTION",
-    })
-      .sort({ date: -1 })
-      .populate("meta.bus", "busCode model chassisNumber engineNumber")
-      .lean();
-
-    // Final Response
-    res.json({
-      item,
-      vendors: purchaseAgg.map((pa) => ({
-        vendor: vendors.find((v) => v._id.equals(pa._id)),
-        totalPurchased: pa.totalPurchased,
-        avgRate: pa.avgRate,
-        lastPurchaseDate: pa.lastPurchaseDate,
-      })),
-      stock: {
-        purchased,
-        consumed,
-        currentStock,
-      },
-      consumption: consumptionSummary,
-      purchaseHistory,
-      consumptionHistory,
-    });
   } catch (err) {
     console.error("Error in getItemOverview:", err);
     res.status(500).json({ error: err.message });
