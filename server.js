@@ -32,6 +32,7 @@ app.use(express.json());
 
 app.use('/api/items',itemRoutes);
 app.use('/api/auth', authRoutes);
+console.log("✅ Purchase Invoice routes mounted at /api/purchase-invoices");
 app.use('/api/purchase-invoices', purchaseBillInvoice);
 app.use('/api/stock-ledger', stockRoutes);
 app.use('/api/export', exportRoutes);
