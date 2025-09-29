@@ -1,13 +1,14 @@
 const ExcelJS = require("exceljs");
 const PurchaseInvoice = require("../models/purchaseInvoice");
-const { getAllItemsSummary } = require("../services/Stock"); 
+const InventoryTransaction = require("../models/InventoryTransaction");
+const { getAllItemsSummary } = require("../services/Stock");
 
 const IST = "Asia/Kolkata";
 const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
 
 exports.exportData = async (req, res) => {
   try {
-    let { from, to } = req.query;
+    let { from, to, itemId } = req.query;
 
     if (!from) {
       return res.status(400).json({ error: "Please provide ?from=YYYY-MM-DD" });
@@ -22,16 +23,20 @@ exports.exportData = async (req, res) => {
 
     endDate.setHours(23, 59, 59, 999);
 
+    // --- Purchases
     const purchaseInvoices = await PurchaseInvoice.find({
       createdAt: { $gte: startDate, $lte: endDate },
     })
-      .populate("items.item", "name unit") 
+      .populate("items.item", "headDescription unit")
       .lean();
 
+    // --- Inventory summary
     const inventorySummary = await getAllItemsSummary();
 
+    // --- Workbook
     const workbook = new ExcelJS.Workbook();
 
+    // ---------------- Purchase Sheet ----------------
     const purchaseSheet = workbook.addWorksheet("Purchase Invoices");
     purchaseSheet.columns = [
       { header: "Invoice No", key: "invoiceNumber", width: 16 },
@@ -59,6 +64,7 @@ exports.exportData = async (req, res) => {
       });
     });
 
+    // ---------------- Invoice Items Sheet ----------------
     const itemSheet = workbook.addWorksheet("Invoice Items");
     itemSheet.columns = [
       { header: "Invoice No", key: "invoiceNumber", width: 16 },
@@ -81,8 +87,8 @@ exports.exportData = async (req, res) => {
         itemSheet.addRow({
           invoiceNumber: inv.invoiceNumber,
           partyName: inv.partyName,
-          item: i.item?.name || "", 
-          description: i.description,
+          item: i.item?.headDescription || "",
+          description: i.overrideDescription || i.subDescription || "",
           headQuantity: i.headQuantity,
           headQuantityMeasurement: i.headQuantityMeasurement,
           subQuantity: i.subQuantity,
@@ -96,6 +102,7 @@ exports.exportData = async (req, res) => {
       });
     });
 
+    // ---------------- Inventory Summary Sheet ----------------
     const invSheet = workbook.addWorksheet("Inventory Summary");
     invSheet.columns = [
       { header: "Item", key: "itemName", width: 22 },
@@ -123,6 +130,109 @@ exports.exportData = async (req, res) => {
       });
     });
 
+    // ---------------- Item Ledger Sheet ----------------
+    if (itemId) {
+      const txns = await InventoryTransaction.find({
+        item: itemId,
+        date: { $gte: startDate, $lte: endDate },
+      }).sort({ date: 1 }).lean();
+
+      const byDay = {};
+      txns.forEach(t => {
+        const d = new Date(t.date).toISOString().split("T")[0];
+        if (!byDay[d]) {
+          byDay[d] = {
+            purchase: { qty: 0, amt: 0 },
+            issue: { qty: 0, amt: 0 },
+            consumption: { qty: 0, amt: 0 },
+            sale: { qty: 0, amt: 0 },
+          };
+        }
+        if (t.type === "PURCHASE") {
+          byDay[d].purchase.qty += t.quantity;
+          byDay[d].purchase.amt += t.amount;
+        }
+        if (t.type === "ISSUE_TO_SUB") {
+          byDay[d].issue.qty += t.quantity;
+          byDay[d].issue.amt += t.amount;
+        }
+        if (t.type === "CONSUMPTION") {
+          byDay[d].consumption.qty += t.quantity;
+          byDay[d].consumption.amt += t.amount;
+        }
+        if (t.type === "SALE") {
+          byDay[d].sale.qty += t.quantity;
+          byDay[d].sale.amt += t.amount;
+        }
+      });
+
+      const ledgerSheet = workbook.addWorksheet("Item Ledger");
+      ledgerSheet.columns = [
+        { header: "Date", key: "date", width: 16 },
+        { header: "Opening Main", key: "openingMain", width: 18 },
+        { header: "Opening Sub", key: "openingSub", width: 18 },
+        { header: "Opening Total", key: "openingTotal", width: 18 },
+        { header: "Opening Amount", key: "openingAmount", width: 20 },
+        { header: "Purchase Qty", key: "purchaseQty", width: 18 },
+        { header: "Purchase Amt", key: "purchaseAmt", width: 18 },
+        { header: "Issue Qty", key: "issueQty", width: 18 },
+        { header: "Issue Amt", key: "issueAmt", width: 18 },
+        { header: "Consumption Qty", key: "consumptionQty", width: 20 },
+        { header: "Consumption Amt", key: "consumptionAmt", width: 20 },
+        { header: "Sale Qty", key: "saleQty", width: 18 },
+        { header: "Sale Amt", key: "saleAmt", width: 18 },
+        { header: "Closing Main", key: "closingMain", width: 18 },
+        { header: "Closing Sub", key: "closingSub", width: 18 },
+        { header: "Closing Total", key: "closingTotal", width: 18 },
+        { header: "Closing Amount", key: "closingAmount", width: 20 },
+      ];
+
+      let openingMain = 0, openingSub = 0, openingAmt = 0;
+      const dates = Object.keys(byDay).sort();
+
+      for (const d of dates) {
+        const row = byDay[d];
+        const openingTotal = openingMain + openingSub;
+
+        const { qty: purchaseQty, amt: purchaseAmt } = row.purchase;
+        const { qty: issueQty, amt: issueAmt } = row.issue;
+        const { qty: consumptionQty, amt: consumptionAmt } = row.consumption;
+        const { qty: saleQty, amt: saleAmt } = row.sale;
+
+        const closingMain = openingMain + purchaseQty - issueQty;
+        const closingSub = openingSub + issueQty - (consumptionQty + saleQty);
+        const closingTotal = closingMain + closingSub;
+        const closingAmt = openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
+
+        ledgerSheet.addRow({
+          date: d,
+          openingMain,
+          openingSub,
+          openingTotal,
+          openingAmount: openingAmt,
+          purchaseQty,
+          purchaseAmt,
+          issueQty,
+          issueAmt,
+          consumptionQty,
+          consumptionAmt,
+          saleQty,
+          saleAmt,
+          closingMain,
+          closingSub,
+          closingTotal,
+          closingAmount: closingAmt,
+        });
+
+        openingMain = closingMain;
+        openingSub = closingSub;
+        openingAmt = closingAmt;
+      }
+
+      ledgerSheet.getRow(1).font = { bold: true };
+    }
+
+    // ---------------- Styling ----------------
     [purchaseSheet, itemSheet, invSheet].forEach((ws) => {
       ws.getRow(1).font = { bold: true };
       ws.columns.forEach((col) => {
@@ -136,7 +246,7 @@ exports.exportData = async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="purchase-invoices-${from}_to_${to || from}.xlsx"`
+      `attachment; filename="stock-report-${from}_to_${to || from}.xlsx"`
     );
 
     await workbook.xlsx.write(res);

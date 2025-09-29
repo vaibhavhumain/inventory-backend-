@@ -14,7 +14,6 @@ exports.createItem = async (req, res) => {
     if (!category) {
       return res.status(400).json({ error: "category is required" });
     }
-//test
     const newItem = new Item({
       category,
       headDescription,
@@ -182,58 +181,96 @@ exports.getItemOverview = async (req, res) => {
 
 exports.getItemLedger = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // itemId
     const item = await Item.findById(id);
     if (!item) return res.status(404).json({ error: "Item not found" });
 
+    // Fetch all transactions for this item
     const txns = await InventoryTransaction.find({ item: id })
       .sort({ date: 1 })
       .lean();
 
     if (!txns.length) return res.json({ item, ledger: [] });
 
+    // Group transactions by day
     const byDay = {};
     txns.forEach(t => {
       const d = new Date(t.date).toISOString().split("T")[0];
-      if (!byDay[d]) byDay[d] = { purchase: 0, issue: 0, consumption: 0, sale: 0 };
-      if (t.type === "PURCHASE") byDay[d].purchase += t.quantity;
-      if (t.type === "ISSUE_TO_SUB") byDay[d].issue += t.quantity;
-      if (t.type === "CONSUMPTION") byDay[d].consumption += t.quantity;
-      if (t.type === "SALE") byDay[d].sale += t.quantity;
+      if (!byDay[d]) {
+        byDay[d] = {
+          purchase: { qty: 0, amt: 0 },
+          issue: { qty: 0, amt: 0 },
+          consumption: { qty: 0, amt: 0 },
+          sale: { qty: 0, amt: 0 },
+        };
+      }
+      if (t.type === "PURCHASE") {
+        byDay[d].purchase.qty += t.quantity;
+        byDay[d].purchase.amt += t.amount;
+      }
+      if (t.type === "ISSUE_TO_SUB") {
+        byDay[d].issue.qty += t.quantity;
+        byDay[d].issue.amt += t.amount;
+      }
+      if (t.type === "CONSUMPTION") {
+        byDay[d].consumption.qty += t.quantity;
+        byDay[d].consumption.amt += t.amount;
+      }
+      if (t.type === "SALE") {
+        byDay[d].sale.qty += t.quantity;
+        byDay[d].sale.amt += t.amount;
+      }
     });
 
+    // Walk through days chronologically
     const dates = Object.keys(byDay).sort();
-    let openingMain = 0, openingSub = 0;
+    let openingMain = 0, openingSub = 0, openingAmt = 0;
     const ledger = [];
 
     for (const d of dates) {
       const row = byDay[d];
-      const openingTotal = openingMain + openingSub;
-      const purchase = row.purchase || 0;
-      const issue = row.issue || 0;
-      const consumption = row.consumption || 0;
-      const sale = row.sale || 0;
 
-      let main = openingMain + purchase - issue;
-      let sub = openingSub + issue - (consumption + sale);
-      const closingTotal = main + sub;
+      // Opening
+      const openingTotal = openingMain + openingSub;
+
+      // Movements
+      const { qty: purchaseQty, amt: purchaseAmt } = row.purchase;
+      const { qty: issueQty, amt: issueAmt } = row.issue;
+      const { qty: consumptionQty, amt: consumptionAmt } = row.consumption;
+      const { qty: saleQty, amt: saleAmt } = row.sale;
+
+      // Closing balances
+      const closingMain = openingMain + purchaseQty - issueQty;
+      const closingSub = openingSub + issueQty - (consumptionQty + saleQty);
+      const closingTotal = closingMain + closingSub;
+
+      const closingAmt =
+        openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
 
       ledger.push({
         date: d,
         openingMain,
         openingSub,
         openingTotal,
-        purchase,
-        issue,
-        consumption,
-        sale,
-        balanceMain: main,
-        balanceSub: sub,
+        openingAmount: openingAmt,
+        purchaseQty,
+        purchaseAmt,
+        issueQty,
+        issueAmt,
+        consumptionQty,
+        consumptionAmt,
+        saleQty,
+        saleAmt,
+        closingMain,
+        closingSub,
         closingTotal,
+        closingAmount: closingAmt,
       });
 
-      openingMain = main;
-      openingSub = sub;
+      // Carry forward
+      openingMain = closingMain;
+      openingSub = closingSub;
+      openingAmt = closingAmt;
     }
 
     res.json({ item, ledger });

@@ -16,10 +16,9 @@ const invoiceItemSchema = new mongoose.Schema({
   notes: { type: String }
 }, { _id: false });
 
-
 const purchaseInvoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true, unique: true },
-  date: { type: Date, default: Date.now },
+  date: { type: Date, default: Date.now },      
 
   vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
   partyName: { type: String, required: true },
@@ -67,14 +66,18 @@ purchaseInvoiceSchema.pre('save', function (next) {
 purchaseInvoiceSchema.post('save', async function (doc, next) {
   try {
     await InventoryTransaction.deleteMany({ 'meta.invoice': doc._id });
+
     if (doc.items?.length) {
       const txns = doc.items.map(it => ({
         item: it.item,
         type: 'PURCHASE',
         quantity: it.subQuantity,
+        rate: it.rate || 0,
+        amount: (it.subQuantity || 0) * (it.rate || 0), 
         date: doc.date,
         meta: { invoice: doc._id },
       }));
+
       await InventoryTransaction.insertMany(txns);
     }
     next();
@@ -82,5 +85,6 @@ purchaseInvoiceSchema.post('save', async function (doc, next) {
     next(err);
   }
 });
+
 
 module.exports = mongoose.model('PurchaseInvoice', purchaseInvoiceSchema);

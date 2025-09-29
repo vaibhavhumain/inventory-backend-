@@ -3,7 +3,6 @@ const Item = require("../models/item");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const Bus = require("../models/Bus");
 
-// ✅ Create Issue Bill
 exports.createIssueBill = async (req, res) => {
   try {
     const { issueDate, department, items, issuedBy, type, issuedTo, bus } = req.body;
@@ -12,7 +11,6 @@ exports.createIssueBill = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // ✅ Validate type
     if (!["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE"].includes(type)) {
       return res.status(400).json({ error: "Invalid issue type" });
     }
@@ -20,56 +18,54 @@ exports.createIssueBill = async (req, res) => {
     let totalAmount = 0;
     const processedItems = [];
 
-    // ✅ Process each item
     for (const it of items) {
       const dbItem = await Item.findById(it.item);
       if (!dbItem) {
         return res.status(400).json({ error: `Item ${it.item} not found` });
       }
 
-      // ✅ Stock validation + movement
+      // ✅ Stock movement logic
       if (type === "MAIN_TO_SUB") {
         if (dbItem.mainStoreQty < it.quantity) {
-          return res
-            .status(400)
-            .json({ error: `Not enough stock in Main Store for ${dbItem.name}` });
+          return res.status(400).json({ error: `Not enough stock in Main Store for ${dbItem.headDescription}` });
         }
         dbItem.mainStoreQty -= it.quantity;
         dbItem.subStoreQty += it.quantity;
-      } else if (type === "SUB_TO_USER" || type === "SUB_TO_SALE") {
+      } else if (["SUB_TO_USER", "SUB_TO_SALE"].includes(type)) {
         if (dbItem.subStoreQty < it.quantity) {
-          return res
-            .status(400)
-            .json({ error: `Not enough stock in Sub Store for ${dbItem.name}` });
+          return res.status(400).json({ error: `Not enough stock in Sub Store for ${dbItem.headDescription}` });
         }
         dbItem.subStoreQty -= it.quantity;
       }
 
-      // ✅ Closing qty
-      const closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
-      dbItem.closingQty = closingQty;
+      dbItem.closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
 
       dbItem.dailyStock.push({
-        date: new Date(),
+        date: issueDate || new Date(),
         in: 0,
         out: it.quantity,
-        closingQty,
+        closingQty: dbItem.closingQty,
         mainStoreQty: dbItem.mainStoreQty,
         subStoreQty: dbItem.subStoreQty,
       });
 
       await dbItem.save();
 
-      // ✅ Log Inventory Transaction
+      // ✅ Map IssueBill types → InventoryTransaction types
+      let txnType = "ISSUE_TO_SUB";
+      if (type === "SUB_TO_USER") txnType = "CONSUMPTION";
+      if (type === "SUB_TO_SALE") txnType = "SALE";
+
+      // ✅ Always save rate + amount
+      const lineAmount = (it.rate || 0) * (it.quantity || 0);
+      totalAmount += lineAmount;
+
       await InventoryTransaction.create({
         item: dbItem._id,
-        type:
-          type === "MAIN_TO_SUB"
-            ? "ISSUE_TO_SUB"
-            : type === "SUB_TO_USER"
-            ? "CONSUMPTION"
-            : "SALE",
+        type: txnType,
         quantity: it.quantity,
+        rate: it.rate || 0,    // ✅ added
+        amount: lineAmount,    // ✅ already good
         date: issueDate || new Date(),
         meta: {
           note: `Issued by ${issuedBy || "N/A"} to ${issuedTo || department}`,
@@ -77,19 +73,14 @@ exports.createIssueBill = async (req, res) => {
         },
       });
 
-      // ✅ Amount
-      const amount = (it.rate || 0) * (it.quantity || 0);
-      totalAmount += amount;
-
       processedItems.push({
         item: it.item,
         quantity: it.quantity,
         rate: it.rate || 0,
-        amount,
+        amount: lineAmount,
       });
     }
 
-    // ✅ Create Issue Bill
     const newBill = new IssueBill({
       issueDate,
       department,
@@ -102,19 +93,9 @@ exports.createIssueBill = async (req, res) => {
 
     await newBill.save();
 
-    // ✅ If SUB_TO_USER → also create a Bus record
     if (type === "SUB_TO_USER" && bus) {
-      const newBus = new Bus({
-        chassisNumber: bus.chassisNumber,
-        engineNumber: bus.engineNumber,
-        model: bus.model,
-        remarks: bus.remarks,
-        issueBill: newBill._id,
-      });
-
+      const newBus = new Bus(bus);
       await newBus.save();
-
-      // Link bus to IssueBill
       newBill.bus = newBus._id;
       await newBill.save();
     }
@@ -125,6 +106,7 @@ exports.createIssueBill = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
 
 // ✅ Get all issue bills
 exports.getIssueBills = async (req, res) => {
