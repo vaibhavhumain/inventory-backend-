@@ -204,21 +204,25 @@ exports.getItemLedger = async (req, res) => {
           sale: { qty: 0, amt: 0 },
         };
       }
+
+      // Ensure amount fallback
+      const lineAmount = t.amount ?? (t.quantity * (t.rate || 0));
+
       if (t.type === "PURCHASE") {
         byDay[d].purchase.qty += t.quantity;
-        byDay[d].purchase.amt += t.amount;
+        byDay[d].purchase.amt += lineAmount;
       }
       if (t.type === "ISSUE_TO_SUB") {
         byDay[d].issue.qty += t.quantity;
-        byDay[d].issue.amt += t.amount;
+        byDay[d].issue.amt += lineAmount;
       }
       if (t.type === "CONSUMPTION") {
         byDay[d].consumption.qty += t.quantity;
-        byDay[d].consumption.amt += t.amount;
+        byDay[d].consumption.amt += lineAmount;
       }
       if (t.type === "SALE") {
         byDay[d].sale.qty += t.quantity;
-        byDay[d].sale.amt += t.amount;
+        byDay[d].sale.amt += lineAmount;
       }
     });
 
