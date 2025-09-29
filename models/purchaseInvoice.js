@@ -73,16 +73,16 @@ purchaseInvoiceSchema.post('save', async function (doc, next) {
         type: 'PURCHASE',
         quantity: it.subQuantity,
         rate: it.rate || 0,
-        amount: (it.subQuantity || 0) * (it.rate || 0), 
+        amount: (it.subQuantity || 0) * (it.rate || 0),
         date: doc.date,
         meta: { invoice: doc._id },
       }));
-
       await InventoryTransaction.insertMany(txns);
     }
-    next();
+
+    return next();  
   } catch (err) {
-    next(err);
+    return next(err);
   }
 });
 
