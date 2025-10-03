@@ -47,3 +47,26 @@ exports.getBusConsumptions = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Get bus consumption by ID
+exports.getBusConsumptionById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const busConsumption = await BusConsumption.findById(id)
+      .populate({
+        path: 'issueBill',
+        populate: [
+          { path: 'items.item', model: 'Item' }
+        ],
+      });
+
+    if (!busConsumption) {
+      return res.status(404).json({ error: 'Bus consumption not found' });
+    }
+
+    res.json(busConsumption);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

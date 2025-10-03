@@ -4,5 +4,6 @@ const busConsumptionController = require('../controllers/busConsumptionControlle
 
 router.post('/', busConsumptionController.createBusConsumption);
 router.get('/', busConsumptionController.getBusConsumptions);
+router.get('/:id', busConsumptionController.getBusConsumptionById);
 
 module.exports = router;
