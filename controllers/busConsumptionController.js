@@ -55,17 +55,44 @@ exports.getBusConsumptionById = async (req, res) => {
 
     const busConsumption = await BusConsumption.findById(id)
       .populate({
-        path: 'issueBill',
+        path: "issueBill",
         populate: [
-          { path: 'items.item', model: 'Item' }
+          { path: "items.item", model: "Item" }, // populates item details
+          { path: "bus", model: "Bus" }          // if you want bus details too
         ],
       });
 
     if (!busConsumption) {
-      return res.status(404).json({ error: 'Bus consumption not found' });
+      return res.status(404).json({ error: "Bus consumption not found" });
     }
 
-    res.json(busConsumption);
+    // Build a clean response object
+    res.json({
+      _id: busConsumption._id,
+      busCode: busConsumption.busCode || busConsumption.bus?.busCode || "-",
+      chassisNumber: busConsumption.chassisNumber,
+      engineNumber: busConsumption.engineNumber,
+      consumedBy: busConsumption.consumedBy || "-",
+
+      issueBill: {
+        issueDate: busConsumption.issueBill.issueDate,
+        department: busConsumption.issueBill.department,
+        issuedBy: busConsumption.issueBill.issuedBy,
+        issuedTo: busConsumption.issueBill.issuedTo,
+        type: busConsumption.issueBill.type,
+        totalAmount: busConsumption.issueBill.totalAmount,
+
+        // Each item already has amount calculated in schema
+        items: busConsumption.issueBill.items.map((it) => ({
+          code: it.item?.code || "-",
+          description: it.item?.headDescription || "",
+          uqc: it.item?.unit || "-",
+          quantity: it.quantity,
+          rate: it.rate,
+          amount: it.amount,
+        })),
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
