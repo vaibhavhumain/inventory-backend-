@@ -35,7 +35,8 @@ exports.getBusConsumptions = async (req, res) => {
   try {
     const buses = await Bus.find()
       .populate({
-        path: 'issueBill',
+        path: 'issueBills',
+        model: 'IssueBill',
         populate: [{ path: 'items.item', model: 'Item' }],
       })
       .sort({ createdAt: -1 });
@@ -52,7 +53,8 @@ exports.getBusConsumptionById = async (req, res) => {
   try {
     const bus = await Bus.findById(req.params.id)
       .populate({
-        path: "issueBill",
+        path: "issueBills",
+        model: "IssueBill",
         populate: [{ path: "items.item", model: "Item" }],
       });
 
