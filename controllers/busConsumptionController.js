@@ -1,5 +1,5 @@
-  const Bus = require('../models/Bus');
-  const IssueBill = require('../models/issueBill');
+const Bus = require('../models/Bus');
+const IssueBill = require('../models/issueBill');
 
 // Create bus linked to issue bill (SUB_TO_USER only)
 exports.createBusConsumption = async (req, res) => {
@@ -15,14 +15,16 @@ exports.createBusConsumption = async (req, res) => {
       return res.status(400).json({ error: 'Bus consumption allowed only for SUB_TO_USER issue bills' });
     }
 
+    // ✅ Create bus and link issueBill inside issueBills array
     const bus = new Bus({
       chassisNumber,
       engineNumber,
-      issueBill: issueBill._id,
       remarks: consumedBy || null,
+      issueBills: [issueBill._id],   // ✅ FIXED
     });
 
     await bus.save();
+
     res.status(201).json(bus);
   } catch (err) {
     console.error("Error creating bus consumption:", err);
@@ -60,30 +62,30 @@ exports.getBusConsumptionById = async (req, res) => {
 
     if (!bus) return res.status(404).json({ error: "Bus not found" });
 
+    // ✅ Return multiple issueBills, not single issueBill
     res.json({
       _id: bus._id,
       busCode: bus.busCode,
       chassisNumber: bus.chassisNumber,
       engineNumber: bus.engineNumber,
       remarks: bus.remarks,
-      issueBill: bus.issueBill
-        ? {
-            issueDate: bus.issueBill.issueDate,
-            department: bus.issueBill.department,
-            issuedBy: bus.issueBill.issuedBy,
-            issuedTo: bus.issueBill.issuedTo,
-            type: bus.issueBill.type,
-            totalAmount: bus.issueBill.totalAmount,
-            items: bus.issueBill.items.map(it => ({
-              code: it.item?.code || "-",
-              description: it.item?.headDescription || "",
-              uqc: it.item?.unit || "-",
-              quantity: it.quantity,
-              rate: it.rate,
-              amount: it.amount,
-            })),
-          }
-        : null,
+      issueBills: bus.issueBills.map((ib) => ({
+        _id: ib._id,
+        issueDate: ib.issueDate,
+        department: ib.department,
+        issuedBy: ib.issuedBy,
+        issuedTo: ib.issuedTo,
+        type: ib.type,
+        totalAmount: ib.totalAmount,
+        items: ib.items.map(it => ({
+          code: it.item?.code || "-",
+          description: it.item?.headDescription || "",
+          uqc: it.item?.unit || "-",
+          quantity: it.quantity,
+          rate: it.rate,
+          amount: it.amount,
+        })),
+      })),
     });
   } catch (err) {
     console.error("Error fetching bus consumption by ID:", err);
