@@ -30,7 +30,8 @@ async function getItemSummary(itemId) {
 
   return {
     itemId: item?._id,
-    itemName: item?.name,
+    itemCode: item?.code,
+    description: item?.headDescription,
     unit: item?.unit,
     vendorId: item?.vendor?._id,
     vendorName: item?.vendor?.name || null,
@@ -61,7 +62,7 @@ async function ensureSufficientStock(itemId, type, qty) {
   }
 }
 
-// ✅ All Items Daily Summary
+// ✅ All Items Daily Summary (with Item Code + Description)
 async function getAllItemsSummary() {
   const rows = await InventoryTransaction.aggregate([
     {
@@ -89,9 +90,20 @@ async function getAllItemsSummary() {
       },
     },
     {
+      $lookup: {
+        from: "items",
+        localField: "_id.item",
+        foreignField: "_id",
+        as: "item",
+      },
+    },
+    { $unwind: "$item" },
+    {
       $project: {
         itemId: "$_id.item",
         date: "$_id.date",
+        itemCode: "$item.code",
+        description: "$item.headDescription",
         purchaseQty: 1,
         purchaseAmt: 1,
         issueQty: 1,
@@ -105,20 +117,31 @@ async function getAllItemsSummary() {
     { $sort: { date: 1 } },
   ]);
 
-  // ✅ Compute running balances day by day
-  let openingMain = 0, openingSub = 0, openingAmt = 0;
-  return rows.map(r => {
-    const closingMain = openingMain + r.purchaseQty - r.issueQty;
-    const closingSub = openingSub + r.issueQty - (r.consumptionQty + r.saleQty);
+  // ✅ Compute running balances day by day (per item separately)
+  const groupedByItem = {};
+  rows.forEach((r) => {
+    if (!groupedByItem[r.itemId]) {
+      groupedByItem[r.itemId] = { openingMain: 0, openingSub: 0, openingAmt: 0, records: [] };
+    }
+    const state = groupedByItem[r.itemId];
+
+    const closingMain = state.openingMain + r.purchaseQty - r.issueQty;
+    const closingSub = state.openingSub + r.issueQty - (r.consumptionQty + r.saleQty);
     const closingTotal = closingMain + closingSub;
-    const closingAmt = openingAmt + r.purchaseAmt - (r.issueAmt + r.consumptionAmt + r.saleAmt);
+    const closingAmt =
+      state.openingAmt +
+      r.purchaseAmt -
+      (r.issueAmt + r.consumptionAmt + r.saleAmt);
 
     const rowWithCalc = {
       date: r.date,
-      openingMain,
-      openingSub,
-      openingTotal: openingMain + openingSub,
-      openingAmount: openingAmt,
+      itemId: r.itemId,
+      itemCode: r.itemCode,
+      description: r.description,
+      openingMain: state.openingMain,
+      openingSub: state.openingSub,
+      openingTotal: state.openingMain + state.openingSub,
+      openingAmount: state.openingAmt,
       purchaseQty: r.purchaseQty,
       purchaseAmt: r.purchaseAmt,
       issueQty: r.issueQty,
@@ -133,13 +156,16 @@ async function getAllItemsSummary() {
       closingAmount: closingAmt,
     };
 
-    // carry forward to next day
-    openingMain = closingMain;
-    openingSub = closingSub;
-    openingAmt = closingAmt;
+    state.records.push(rowWithCalc);
 
-    return rowWithCalc;
+    // carry forward for next row of same item
+    state.openingMain = closingMain;
+    state.openingSub = closingSub;
+    state.openingAmt = closingAmt;
   });
+
+  // flatten into one array
+  return Object.values(groupedByItem).flatMap((g) => g.records);
 }
 
 module.exports = {
