@@ -56,7 +56,6 @@ exports.createIssueBill = async (req, res) => {
       if (type === "SUB_TO_USER") txnType = "CONSUMPTION";
       if (type === "SUB_TO_SALE") txnType = "SALE";
 
-      // ✅ Always save rate + amount
       const lineAmount = (it.rate || 0) * (it.quantity || 0);
       totalAmount += lineAmount;
 
@@ -64,8 +63,8 @@ exports.createIssueBill = async (req, res) => {
         item: dbItem._id,
         type: txnType,
         quantity: it.quantity,
-        rate: it.rate || 0,    // ✅ added
-        amount: lineAmount,    // ✅ already good
+        rate: it.rate || 0,
+        amount: lineAmount,
         date: issueDate || new Date(),
         meta: {
           note: `Issued by ${issuedBy || "N/A"} to ${issuedTo || department}`,
@@ -81,6 +80,7 @@ exports.createIssueBill = async (req, res) => {
       });
     }
 
+    // ✅ Create new IssueBill
     const newBill = new IssueBill({
       issueDate,
       department,
@@ -93,10 +93,31 @@ exports.createIssueBill = async (req, res) => {
 
     await newBill.save();
 
+    // ✅ Attach IssueBill to an existing Bus if provided
     if (type === "SUB_TO_USER" && bus) {
-      const newBus = new Bus(bus);
-      await newBus.save();
-      newBill.bus = newBus._id;
+      const existingBus = await Bus.findOne({
+        chassisNumber: bus.chassisNumber,
+        engineNumber: bus.engineNumber,
+      });
+
+      if (existingBus) {
+        // push issue bill to existing bus
+        existingBus.issueBills.push(newBill._id);
+        await existingBus.save();
+        newBill.bus = existingBus._id;
+      } else {
+        // create new bus with this issue bill
+        const newBus = new Bus({
+          chassisNumber: bus.chassisNumber,
+          engineNumber: bus.engineNumber,
+          model: bus.model || "",
+          remarks: bus.remarks || "",
+          issueBills: [newBill._id],
+        });
+        await newBus.save();
+        newBill.bus = newBus._id;
+      }
+
       await newBill.save();
     }
 
@@ -106,6 +127,7 @@ exports.createIssueBill = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
 
 
 // ✅ Get all issue bills
