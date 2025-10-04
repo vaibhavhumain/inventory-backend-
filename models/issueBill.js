@@ -37,7 +37,10 @@ const issueBillSchema = new mongoose.Schema(
 
     items: [billItemSchema],
     totalAmount: { type: Number, default: 0 },
-    issuedBy: { type: String },
+issuedBy: {
+  id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  name: { type: String },
+},
     bus: { type: mongoose.Schema.Types.ObjectId, ref: "Bus" },
   },
   { timestamps: true }
