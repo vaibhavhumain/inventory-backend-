@@ -16,7 +16,6 @@ const busSchema = new mongoose.Schema(
     model: { type: String },
     remarks: { type: String },
 
-    // ✅ Multiple issue bills allowed (no validation error)
     issueBills: [
       {
         type: mongoose.Schema.Types.ObjectId,

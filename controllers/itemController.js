@@ -4,16 +4,14 @@ const Vendor = require("../models/vendor");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const Bus = require("../models/Bus");
+
 exports.createItem = async (req, res) => {
   try {
     const { category, headDescription, subDescription, unit, hsnCode, remarks, vendor } = req.body;
 
-    if (!headDescription) {
-      return res.status(400).json({ error: "headDescription is required" });
-    }
-    if (!category) {
-      return res.status(400).json({ error: "category is required" });
-    }
+    if (!headDescription) return res.status(400).json({ error: "headDescription is required" });
+    if (!category) return res.status(400).json({ error: "category is required" });
+
     const newItem = new Item({
       category,
       headDescription,
@@ -21,7 +19,7 @@ exports.createItem = async (req, res) => {
       unit: unit || "pcs",
       hsnCode,
       remarks,
-      vendor
+      vendor,
     });
 
     await newItem.save();
@@ -44,7 +42,7 @@ exports.getItems = async (req, res) => {
 exports.deleteItem = async (req, res) => {
   try {
     await Item.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Deleted' });
+    res.json({ message: "Deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -53,12 +51,9 @@ exports.deleteItem = async (req, res) => {
 exports.getItemOverview = async (req, res) => {
   try {
     const { id } = req.params;
-
-    // 1. Item details
     const item = await Item.findById(id).populate("vendor");
     if (!item) return res.status(404).json({ error: "Item not found" });
 
-    // 2. Purchases grouped by vendor (summary)
     const purchaseAgg = await PurchaseInvoice.aggregate([
       { $unwind: "$items" },
       { $match: { "items.item": new mongoose.Types.ObjectId(id) } },
@@ -72,11 +67,8 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
-    const vendors = await Vendor.find({
-      _id: { $in: purchaseAgg.map((p) => p._id) },
-    }).lean();
+    const vendors = await Vendor.find({ _id: { $in: purchaseAgg.map((p) => p._id) } }).lean();
 
-    // 3. Stock from transactions
     const txns = await InventoryTransaction.aggregate([
       { $match: { item: new mongoose.Types.ObjectId(id) } },
       {
@@ -95,13 +87,9 @@ exports.getItemOverview = async (req, res) => {
     });
     const currentStock = purchased - consumed;
 
-    // 4. Bus consumption breakdown (summary)
     const busAgg = await InventoryTransaction.aggregate([
       {
-        $match: {
-          item: new mongoose.Types.ObjectId(id),
-          type: "CONSUMPTION",
-        },
+        $match: { item: new mongoose.Types.ObjectId(id), type: "CONSUMPTION" },
       },
       {
         $group: {
@@ -111,10 +99,7 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
-    const buses = await Bus.find({
-      _id: { $in: busAgg.map((b) => b._id) },
-    }).lean();
-
+    const buses = await Bus.find({ _id: { $in: busAgg.map((b) => b._id) } }).lean();
     const consumptionSummary = busAgg.map((bc) => {
       const busDoc = buses.find((b) => b._id.toString() === bc._id?.toString());
       return {
@@ -131,32 +116,25 @@ exports.getItemOverview = async (req, res) => {
       };
     });
 
-    // 5. Full purchase history (detailed)
-    const purchaseHistory = await PurchaseInvoice.find({
-      "items.item": id,
-    })
+    const purchaseHistory = await PurchaseInvoice.find({ "items.item": id })
       .sort({ date: -1 })
       .populate("vendor", "name code")
-      .populate("items.item", "code headDescription subDescription unit")
+      .populate("items.item", "code headDescription subDescription unit hsnCode")
       .lean();
 
-    // Pick latest invoice hsnCode if available
-    let latestHsnCode = null;
+    let latestHsnCode = item.hsnCode || null;
     if (purchaseHistory.length > 0) {
       const latestInvoice = purchaseHistory[0];
-      const line = latestInvoice.items.find(
-        (it) => it.item._id.toString() === id
-      );
-      if (line?.hsnCode) {
-        latestHsnCode = line.hsnCode;
+      const line = latestInvoice.items.find((it) => it.item?._id.toString() === id);
+      if (line?.hsnSnapshot || line?.item?.hsnCode) {
+        latestHsnCode = line.hsnSnapshot || line.item.hsnCode;
       }
     }
 
-    // Final Response
     res.json({
       item: {
         ...item.toObject?.() || item,
-        hsnCode: latestHsnCode, // 🔑 override from latest invoice
+        hsnCode: latestHsnCode,
       },
       vendors: purchaseAgg.map((pa) => ({
         vendor: vendors.find((v) => v._id.equals(pa._id)),
@@ -164,11 +142,7 @@ exports.getItemOverview = async (req, res) => {
         avgRate: pa.avgRate,
         lastPurchaseDate: pa.lastPurchaseDate,
       })),
-      stock: {
-        purchased,
-        consumed,
-        currentStock,
-      },
+      stock: { purchased, consumed, currentStock },
       consumption: consumptionSummary,
       purchaseHistory,
     });
@@ -178,23 +152,17 @@ exports.getItemOverview = async (req, res) => {
   }
 };
 
-
 exports.getItemLedger = async (req, res) => {
   try {
-    const { id } = req.params; // itemId
+    const { id } = req.params;
     const item = await Item.findById(id);
     if (!item) return res.status(404).json({ error: "Item not found" });
 
-    // Fetch all transactions for this item
-    const txns = await InventoryTransaction.find({ item: id })
-      .sort({ date: 1 })
-      .lean();
-
+    const txns = await InventoryTransaction.find({ item: id }).sort({ date: 1 }).lean();
     if (!txns.length) return res.json({ item, ledger: [] });
 
-    // Group transactions by day
     const byDay = {};
-    txns.forEach(t => {
+    txns.forEach((t) => {
       const d = new Date(t.date).toISOString().split("T")[0];
       if (!byDay[d]) {
         byDay[d] = {
@@ -205,9 +173,7 @@ exports.getItemLedger = async (req, res) => {
         };
       }
 
-      // Ensure amount fallback
-      const lineAmount = t.amount ?? (t.quantity * (t.rate || 0));
-
+      const lineAmount = t.amount ?? t.quantity * (t.rate || 0);
       if (t.type === "PURCHASE") {
         byDay[d].purchase.qty += t.quantity;
         byDay[d].purchase.amt += lineAmount;
@@ -226,30 +192,26 @@ exports.getItemLedger = async (req, res) => {
       }
     });
 
-    // Walk through days chronologically
     const dates = Object.keys(byDay).sort();
-    let openingMain = 0, openingSub = 0, openingAmt = 0;
+    let openingMain = 0,
+      openingSub = 0,
+      openingAmt = 0;
     const ledger = [];
 
     for (const d of dates) {
       const row = byDay[d];
-
-      // Opening
       const openingTotal = openingMain + openingSub;
 
-      // Movements
       const { qty: purchaseQty, amt: purchaseAmt } = row.purchase;
       const { qty: issueQty, amt: issueAmt } = row.issue;
       const { qty: consumptionQty, amt: consumptionAmt } = row.consumption;
       const { qty: saleQty, amt: saleAmt } = row.sale;
 
-      // Closing balances
       const closingMain = openingMain + purchaseQty - issueQty;
       const closingSub = openingSub + issueQty - (consumptionQty + saleQty);
       const closingTotal = closingMain + closingSub;
 
-      const closingAmt =
-        openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
+      const closingAmt = openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
 
       ledger.push({
         date: d,
@@ -271,7 +233,6 @@ exports.getItemLedger = async (req, res) => {
         closingAmount: closingAmt,
       });
 
-      // Carry forward
       openingMain = closingMain;
       openingSub = closingSub;
       openingAmt = closingAmt;
@@ -283,3 +244,4 @@ exports.getItemLedger = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
