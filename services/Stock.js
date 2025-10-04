@@ -5,18 +5,21 @@ function oid(id) {
   return new mongoose.Types.ObjectId(id);
 }
 
+// ✅ Single Item Summary (unchanged)
 async function getItemSummary(itemId) {
   const rows = await InventoryTransaction.aggregate([
     { $match: { item: oid(itemId) } },
-    { $group: { _id: "$type", qty: { $sum: "$quantity" } } },
+    { $group: { _id: "$type", qty: { $sum: "$quantity" }, amt: { $sum: "$amount" } } },
   ]);
 
   let purchase = 0, issue = 0, consumption = 0, sale = 0;
+  let purchaseAmt = 0, issueAmt = 0, consumptionAmt = 0, saleAmt = 0;
+
   for (const r of rows) {
-    if (r._id === "PURCHASE") purchase = r.qty;
-    if (r._id === "ISSUE_TO_SUB") issue = r.qty;
-    if (r._id === "CONSUMPTION") consumption = r.qty;
-    if (r._id === "SALE") sale = r.qty;
+    if (r._id === "PURCHASE") { purchase = r.qty; purchaseAmt = r.amt; }
+    if (r._id === "ISSUE_TO_SUB") { issue = r.qty; issueAmt = r.amt; }
+    if (r._id === "CONSUMPTION") { consumption = r.qty; consumptionAmt = r.amt; }
+    if (r._id === "SALE") { sale = r.qty; saleAmt = r.amt; }
   }
 
   const item = await Item.findById(itemId).populate("vendor");
@@ -34,15 +37,20 @@ async function getItemSummary(itemId) {
     vendorCode: item?.vendor?.code || null,
     gstNumber: item?.vendor?.gstNumber || null,
     purchaseIn: purchase,
+    purchaseAmt,
     issueToSub: issue,
+    issueAmt,
     consumption,
+    consumptionAmt,
     sale,
+    saleAmt,
     balanceMainStore,
     balanceSubStore,
     balanceTotal,
   };
 }
 
+// ✅ Ensure stock check (unchanged)
 async function ensureSufficientStock(itemId, type, qty) {
   const s = await getItemSummary(itemId);
   if (type === 'ISSUE_TO_SUB' && s.balanceMainStore < qty) {
@@ -53,82 +61,86 @@ async function ensureSufficientStock(itemId, type, qty) {
   }
 }
 
+// ✅ All Items Daily Summary
 async function getAllItemsSummary() {
   const rows = await InventoryTransaction.aggregate([
     {
       $group: {
-        _id: { item: "$item", type: "$type" },
+        _id: {
+          item: "$item",
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          type: "$type",
+        },
         qty: { $sum: "$quantity" },
+        amt: { $sum: "$amount" },
       },
     },
     {
       $group: {
-        _id: "$_id.item",
-        purchaseIn: {
-          $sum: { $cond: [{ $eq: ["$_id.type", "PURCHASE"] }, "$qty", 0] },
-        },
-        issueToSub: {
-          $sum: { $cond: [{ $eq: ["$_id.type", "ISSUE_TO_SUB"] }, "$qty", 0] },
-        },
-        consumption: {
-          $sum: { $cond: [{ $eq: ["$_id.type", "CONSUMPTION"] }, "$qty", 0] },
-        },
-        sale: {
-          $sum: { $cond: [{ $eq: ["$_id.type", "SALE"] }, "$qty", 0] },
-        },
+        _id: { item: "$_id.item", date: "$_id.date" },
+        purchaseQty: { $sum: { $cond: [{ $eq: ["$_id.type", "PURCHASE"] }, "$qty", 0] } },
+        purchaseAmt: { $sum: { $cond: [{ $eq: ["$_id.type", "PURCHASE"] }, "$amt", 0] } },
+        issueQty: { $sum: { $cond: [{ $eq: ["$_id.type", "ISSUE_TO_SUB"] }, "$qty", 0] } },
+        issueAmt: { $sum: { $cond: [{ $eq: ["$_id.type", "ISSUE_TO_SUB"] }, "$amt", 0] } },
+        consumptionQty: { $sum: { $cond: [{ $eq: ["$_id.type", "CONSUMPTION"] }, "$qty", 0] } },
+        consumptionAmt: { $sum: { $cond: [{ $eq: ["$_id.type", "CONSUMPTION"] }, "$amt", 0] } },
+        saleQty: { $sum: { $cond: [{ $eq: ["$_id.type", "SALE"] }, "$qty", 0] } },
+        saleAmt: { $sum: { $cond: [{ $eq: ["$_id.type", "SALE"] }, "$amt", 0] } },
       },
     },
-    {
-      $lookup: {
-        from: "items",
-        localField: "_id",
-        foreignField: "_id",
-        as: "item",
-      },
-    },
-    { $unwind: "$item" },
-
-    {
-      $lookup: {
-        from: "vendors",
-        localField: "item.vendor",
-        foreignField: "_id",
-        as: "vendor",
-      },
-    },
-    { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
-
     {
       $project: {
-        itemId: "$_id",
-        itemName: "$item.name",
-        unit: "$item.unit",
-        purchaseIn: 1,
-        issueToSub: 1,
-        consumption: 1,
-        sale: 1,
-        balanceMainStore: { $subtract: ["$purchaseIn", "$issueToSub"] },
-        balanceSubStore: {
-          $subtract: ["$issueToSub", { $add: ["$consumption", "$sale"] }],
-        },
-        balanceTotal: {
-          $add: [
-            { $subtract: ["$purchaseIn", "$issueToSub"] },
-            { $subtract: ["$issueToSub", { $add: ["$consumption", "$sale"] }] },
-          ],
-        },
-        vendorId: "$vendor._id",
-        vendorName: "$vendor.name",
-        vendorCode: "$vendor.code",
-        gstNumber: "$vendor.gstNumber",
+        itemId: "$_id.item",
+        date: "$_id.date",
+        purchaseQty: 1,
+        purchaseAmt: 1,
+        issueQty: 1,
+        issueAmt: 1,
+        consumptionQty: 1,
+        consumptionAmt: 1,
+        saleQty: 1,
+        saleAmt: 1,
       },
     },
-    { $sort: { itemName: 1 } },
+    { $sort: { date: 1 } },
   ]);
 
-  return rows;
-}
+  // ✅ Compute running balances day by day
+  let openingMain = 0, openingSub = 0, openingAmt = 0;
+  return rows.map(r => {
+    const closingMain = openingMain + r.purchaseQty - r.issueQty;
+    const closingSub = openingSub + r.issueQty - (r.consumptionQty + r.saleQty);
+    const closingTotal = closingMain + closingSub;
+    const closingAmt = openingAmt + r.purchaseAmt - (r.issueAmt + r.consumptionAmt + r.saleAmt);
 
+    const rowWithCalc = {
+      date: r.date,
+      openingMain,
+      openingSub,
+      openingTotal: openingMain + openingSub,
+      openingAmount: openingAmt,
+      purchaseQty: r.purchaseQty,
+      purchaseAmt: r.purchaseAmt,
+      issueQty: r.issueQty,
+      issueAmt: r.issueAmt,
+      consumptionQty: r.consumptionQty,
+      consumptionAmt: r.consumptionAmt,
+      saleQty: r.saleQty,
+      saleAmt: r.saleAmt,
+      closingMain,
+      closingSub,
+      closingTotal,
+      closingAmount: closingAmt,
+    };
+
+    // carry forward to next day
+    openingMain = closingMain;
+    openingSub = closingSub;
+    openingAmt = closingAmt;
+
+    return rowWithCalc;
+  });
+}
 
 module.exports = {
   getItemSummary,
