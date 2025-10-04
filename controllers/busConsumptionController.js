@@ -1,7 +1,7 @@
-const BusConsumption = require('../models/Bus');
-const IssueBill = require('../models/issueBill');
+  const Bus = require('../models/Bus');
+  const IssueBill = require('../models/issueBill');
 
-// Create bus consumption (only allowed for SUB_TO_USER issue bills)
+// Create bus linked to issue bill (SUB_TO_USER only)
 exports.createBusConsumption = async (req, res) => {
   try {
     const { chassisNumber, engineNumber, issueBillId, consumedBy } = req.body;
@@ -11,21 +11,21 @@ exports.createBusConsumption = async (req, res) => {
       return res.status(404).json({ error: 'IssueBill not found' });
     }
 
-    // Ensure correct type
     if (issueBill.type !== 'SUB_TO_USER') {
       return res.status(400).json({ error: 'Bus consumption allowed only for SUB_TO_USER issue bills' });
     }
 
-    const busConsumption = new BusConsumption({
+    const bus = new Bus({
       chassisNumber,
       engineNumber,
       issueBill: issueBill._id,
-      consumedBy,
+      remarks: consumedBy || null,
     });
 
-    await busConsumption.save();
-    res.status(201).json(busConsumption);
+    await bus.save();
+    res.status(201).json(bus);
   } catch (err) {
+    console.error("Error creating bus consumption:", err);
     res.status(400).json({ error: err.message });
   }
 };
@@ -33,67 +33,58 @@ exports.createBusConsumption = async (req, res) => {
 // Get all bus consumption history
 exports.getBusConsumptions = async (req, res) => {
   try {
-    const consumptions = await BusConsumption.find()
+    const buses = await Bus.find()
       .populate({
         path: 'issueBill',
-        populate: [
-          { path: 'items.item', model: 'Item' }
-        ],
+        populate: [{ path: 'items.item', model: 'Item' }],
       })
       .sort({ createdAt: -1 });
 
-    res.json(consumptions);
+    res.json(buses);
   } catch (err) {
+    console.error("Error fetching bus consumptions:", err);
     res.status(500).json({ error: err.message });
   }
 };
 
-// Get bus consumption by ID
+// Get single bus consumption
 exports.getBusConsumptionById = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const busConsumption = await BusConsumption.findById(id)
+    const bus = await Bus.findById(req.params.id)
       .populate({
         path: "issueBill",
-        populate: [
-          { path: "items.item", model: "Item" }, // populates item details
-          { path: "bus", model: "Bus" }          // if you want bus details too
-        ],
+        populate: [{ path: "items.item", model: "Item" }],
       });
 
-    if (!busConsumption) {
-      return res.status(404).json({ error: "Bus consumption not found" });
-    }
+    if (!bus) return res.status(404).json({ error: "Bus not found" });
 
-    // Build a clean response object
     res.json({
-      _id: busConsumption._id,
-      busCode: busConsumption.busCode || busConsumption.bus?.busCode || "-",
-      chassisNumber: busConsumption.chassisNumber,
-      engineNumber: busConsumption.engineNumber,
-      consumedBy: busConsumption.consumedBy || "-",
-
-      issueBill: {
-        issueDate: busConsumption.issueBill.issueDate,
-        department: busConsumption.issueBill.department,
-        issuedBy: busConsumption.issueBill.issuedBy,
-        issuedTo: busConsumption.issueBill.issuedTo,
-        type: busConsumption.issueBill.type,
-        totalAmount: busConsumption.issueBill.totalAmount,
-
-        // Each item already has amount calculated in schema
-        items: busConsumption.issueBill.items.map((it) => ({
-          code: it.item?.code || "-",
-          description: it.item?.headDescription || "",
-          uqc: it.item?.unit || "-",
-          quantity: it.quantity,
-          rate: it.rate,
-          amount: it.amount,
-        })),
-      },
+      _id: bus._id,
+      busCode: bus.busCode,
+      chassisNumber: bus.chassisNumber,
+      engineNumber: bus.engineNumber,
+      remarks: bus.remarks,
+      issueBill: bus.issueBill
+        ? {
+            issueDate: bus.issueBill.issueDate,
+            department: bus.issueBill.department,
+            issuedBy: bus.issueBill.issuedBy,
+            issuedTo: bus.issueBill.issuedTo,
+            type: bus.issueBill.type,
+            totalAmount: bus.issueBill.totalAmount,
+            items: bus.issueBill.items.map(it => ({
+              code: it.item?.code || "-",
+              description: it.item?.headDescription || "",
+              uqc: it.item?.unit || "-",
+              quantity: it.quantity,
+              rate: it.rate,
+              amount: it.amount,
+            })),
+          }
+        : null,
     });
   } catch (err) {
+    console.error("Error fetching bus consumption by ID:", err);
     res.status(500).json({ error: err.message });
   }
 };
