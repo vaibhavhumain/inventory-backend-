@@ -1,12 +1,13 @@
-const IssueBill = require("../models/issueBill");
-const Item = require("../models/item");
-const InventoryTransaction = require("../models/InventoryTransaction");
+const Item = require("../models/Item");
 const Bus = require("../models/Bus");
+const IssueBill = require("../models/issueBill");
+const InventoryTransaction = require("../models/InventoryTransaction");
 
 exports.createIssueBill = async (req, res) => {
   try {
     const { issueDate, department, items, type, issuedTo, bus } = req.body;
 
+    // ✅ Basic validation
     if (!department || !items || items.length === 0 || !type) {
       return res.status(400).json({ error: "Missing required fields" });
     }
@@ -22,32 +23,27 @@ exports.createIssueBill = async (req, res) => {
     let totalAmount = 0;
     const processedItems = [];
 
+    // 🔹 Process each item
     for (const it of items) {
       const dbItem = await Item.findById(it.item);
       if (!dbItem) {
-        return res
-          .status(400)
-          .json({ error: `Item ${it.item} not found` });
+        return res.status(400).json({ error: `Item ${it.item} not found` });
       }
 
-      // ✅ Stock movement logic
+      // 🔹 Stock adjustments
       if (type === "MAIN_TO_SUB") {
         if (dbItem.mainStoreQty < it.quantity) {
-          return res
-            .status(400)
-            .json({
-              error: `Not enough stock in Main Store for ${dbItem.headDescription}`,
-            });
+          return res.status(400).json({
+            error: `Not enough stock in Main Store for ${dbItem.headDescription}`,
+          });
         }
         dbItem.mainStoreQty -= it.quantity;
         dbItem.subStoreQty += it.quantity;
       } else if (["SUB_TO_USER", "SUB_TO_SALE"].includes(type)) {
         if (dbItem.subStoreQty < it.quantity) {
-          return res
-            .status(400)
-            .json({
-              error: `Not enough stock in Sub Store for ${dbItem.headDescription}`,
-            });
+          return res.status(400).json({
+            error: `Not enough stock in Sub Store for ${dbItem.headDescription}`,
+          });
         }
         dbItem.subStoreQty -= it.quantity;
       }
@@ -65,7 +61,7 @@ exports.createIssueBill = async (req, res) => {
 
       await dbItem.save();
 
-      // ✅ Map IssueBill types → InventoryTransaction types
+      // 🔹 Transaction type mapping
       let txnType = "ISSUE_TO_SUB";
       if (type === "SUB_TO_USER") txnType = "CONSUMPTION";
       if (type === "SUB_TO_SALE") txnType = "SALE";
@@ -94,7 +90,7 @@ exports.createIssueBill = async (req, res) => {
       });
     }
 
-    // ✅ Create new IssueBill with auto-filled issuedBy
+    // ✅ Create new IssueBill
     const newBill = new IssueBill({
       issueDate,
       department,
@@ -112,23 +108,20 @@ exports.createIssueBill = async (req, res) => {
 
     await newBill.save();
 
-    // ✅ Attach IssueBill to Bus if provided
-    if (type === "SUB_TO_USER" && bus) {
-      const existingBus = await Bus.findOne({
-        chassisNumber: bus.chassisNumber,
-        engineNumber: bus.engineNumber,
-      });
+    // ✅ Attach IssueBill to Bus (new structure)
+    if (type === "SUB_TO_USER" && bus?.busCode) {
+      // Find or create Bus by busCode
+      let existingBus = await Bus.findOne({ busCode: bus.busCode });
 
       if (existingBus) {
-        existingBus.issueBills.push(newBill._id);
-        await existingBus.save();
+        if (!existingBus.issueBills.includes(newBill._id)) {
+          existingBus.issueBills.push(newBill._id);
+          await existingBus.save();
+        }
         newBill.bus = existingBus._id;
       } else {
         const newBus = new Bus({
-          chassisNumber: bus.chassisNumber,
-          engineNumber: bus.engineNumber,
-          model: bus.model || "",
-          remarks: bus.remarks || "",
+          busCode: bus.busCode,
           issueBills: [newBill._id],
         });
         await newBus.save();
