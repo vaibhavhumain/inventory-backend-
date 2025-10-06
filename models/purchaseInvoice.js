@@ -2,9 +2,6 @@ const mongoose = require('mongoose');
 const InventoryTransaction = require('./InventoryTransaction');
 const Item = require('./item');
 
-// -----------------------------
-// Invoice Item Schema
-// -----------------------------
 const invoiceItemSchema = new mongoose.Schema(
   {
     item: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
@@ -23,10 +20,6 @@ const invoiceItemSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
-// -----------------------------
-// Purchase Invoice Schema
-// -----------------------------
 const purchaseInvoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: { type: String, required: true, unique: true },
@@ -49,9 +42,6 @@ const purchaseInvoiceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// -----------------------------
-// PRE-SAVE HOOK
-// -----------------------------
 purchaseInvoiceSchema.pre('save', async function (next) {
   try {
     let totalTaxable = 0;
