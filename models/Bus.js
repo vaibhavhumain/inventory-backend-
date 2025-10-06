@@ -8,11 +8,6 @@ const busSchema = new mongoose.Schema(
       unique: true,  
       trim: true,
     },
-    chassisNumber: { type: String, required: true },
-    engineNumber: { type: String, required: true },
-    model: { type: String },
-    remarks: { type: String },
-
     issueBills: [
       {
         type: mongoose.Schema.Types.ObjectId,

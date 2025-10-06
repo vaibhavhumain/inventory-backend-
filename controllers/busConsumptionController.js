@@ -1,68 +1,55 @@
 const Bus = require("../models/Bus");
 const IssueBill = require("../models/issueBill");
 
+// ✅ Create or update bus consumption (SUB_TO_USER only)
 exports.createBusConsumption = async (req, res) => {
   try {
-    const {
-      busCode,
-      chassisNumber,
-      engineNumber,
-      model,
-      remarks,
-      issueBillId,
-      consumedBy,
-    } = req.body;
+    const { busCode, issueBillId } = req.body;
 
-    if (!busCode || !chassisNumber || !engineNumber) {
-      return res
-        .status(400)
-        .json({ error: "Bus Code, Chassis Number, and Engine Number are required" });
+    // 🔹 1. Validate required fields
+    if (!busCode || !issueBillId) {
+      return res.status(400).json({ error: "Bus Code and Issue Bill ID are required." });
     }
 
+    // 🔹 2. Fetch Issue Bill
     const issueBill = await IssueBill.findById(issueBillId);
     if (!issueBill) {
-      return res.status(404).json({ error: "IssueBill not found" });
+      return res.status(404).json({ error: "IssueBill not found." });
     }
 
+    // 🔹 3. Validate type (only SUB_TO_USER)
     if (issueBill.type !== "SUB_TO_USER") {
-      return res
-        .status(400)
-        .json({ error: "Bus consumption allowed only for SUB_TO_USER issue bills" });
+      return res.status(400).json({
+        error: "Bus consumption allowed only for SUB_TO_USER issue bills.",
+      });
     }
 
+    // 🔹 4. Check if Bus already exists
     let bus = await Bus.findOne({ busCode });
 
     if (bus) {
+      // ✅ If bus exists, link issue bill if not already linked
       if (!bus.issueBills.includes(issueBill._id)) {
         bus.issueBills.push(issueBill._id);
+        await bus.save();
       }
 
-      bus.chassisNumber = bus.chassisNumber || chassisNumber;
-      bus.engineNumber = bus.engineNumber || engineNumber;
-      if (model) bus.model = model;
-      if (remarks || consumedBy) bus.remarks = remarks || consumedBy;
-
-      await bus.save();
-
       return res.status(200).json({
-        message: `Existing bus (${busCode}) updated and linked to new Issue Bill.`,
+        message: `Existing bus (${busCode}) updated and linked to issue bill.`,
         bus,
       });
     }
 
+    // 🔹 5. Create new Bus
     bus = new Bus({
       busCode,
-      chassisNumber,
-      engineNumber,
-      model,
-      remarks: remarks || consumedBy || null,
       issueBills: [issueBill._id],
     });
 
     await bus.save();
 
-    res.status(201).json({
-      message: "New bus created and linked successfully",
+    return res.status(201).json({
+      message: "New bus created and linked successfully.",
       bus,
     });
   } catch (err) {
@@ -71,7 +58,7 @@ exports.createBusConsumption = async (req, res) => {
   }
 };
 
-// Get all bus consumption history
+// ✅ Get all bus consumptions
 exports.getBusConsumptions = async (req, res) => {
   try {
     const buses = await Bus.find()
@@ -89,7 +76,7 @@ exports.getBusConsumptions = async (req, res) => {
   }
 };
 
-// Get single bus consumption
+// ✅ Get single bus consumption by ID
 exports.getBusConsumptionById = async (req, res) => {
   try {
     const bus = await Bus.findById(req.params.id)
@@ -99,15 +86,13 @@ exports.getBusConsumptionById = async (req, res) => {
         populate: [{ path: "items.item", model: "Item" }],
       });
 
-    if (!bus) return res.status(404).json({ error: "Bus not found" });
+    if (!bus) {
+      return res.status(404).json({ error: "Bus not found." });
+    }
 
     res.json({
       _id: bus._id,
       busCode: bus.busCode,
-      chassisNumber: bus.chassisNumber,
-      engineNumber: bus.engineNumber,
-      model: bus.model,
-      remarks: bus.remarks,
       issueBills: bus.issueBills.map((ib) => ({
         _id: ib._id,
         issueDate: ib.issueDate,
