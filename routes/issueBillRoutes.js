@@ -6,8 +6,8 @@ const {
   getIssueBills,
   getIssueBillById,
 } = require('../controllers/issueBillController');
-
-router.post('/', createIssueBill);       
+const { protect } = require("../middleware/authMiddleware");
+router.post("/", protect, createIssueBill);
 router.get('/', getIssueBills);         
 router.get('/:id', getIssueBillById);    
 
