@@ -1,4 +1,4 @@
-const Item = require("../models/Item");
+const Item = require("../models/item");
 const Bus = require("../models/Bus");
 const IssueBill = require("../models/issueBill");
 const InventoryTransaction = require("../models/InventoryTransaction");
