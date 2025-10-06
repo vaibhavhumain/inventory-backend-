@@ -15,6 +15,7 @@ const vendorRoutes = require('./routes/vendorRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const stockRoutes2 = require('./routes/stockRoutes');
 const busConsumptionRoutes = require('./routes/busConsumptionRoute');
+const logRoutes = require("./routes/logRoutes");
 connectDB();
 
 const app = express();
@@ -44,6 +45,8 @@ app.use('/api/vendors', vendorRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/stock', stockRoutes2);
 app.use('/api/bus-consumption', busConsumptionRoutes);
+app.use("/api/logs",logRoutes);
+
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});
     res.end();
