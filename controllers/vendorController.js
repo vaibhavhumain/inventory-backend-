@@ -9,6 +9,16 @@ exports.createVendor = async (req, res) => {
       return res.status(400).json({ error: "Vendor name is required" });
     }
 
+    if (gstNumber) {
+      const existingVendor = await Vendor.findOne({ gstNumber: gstNumber.trim() });
+      if (existingVendor) {
+        return res.status(400).json({
+          error: "A vendor with this GST number already exists",
+          existingVendor,
+        });
+      }
+    }
+
     const vendor = new Vendor({ name, address, state, gstNumber });
     await vendor.save();
 

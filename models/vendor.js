@@ -5,8 +5,7 @@ const vendorSchema = new mongoose.Schema({
   name: { type: String, required: true},
   address: { type: String, required: true },
   state: { type: String, required: true },
-  gstNumber: { type: String, required: true },
-}, { timestamps: true });
+  gstNumber: { type: String, required: true, unique: true, trim: true },}, { timestamps: true });
 
 vendorSchema.pre("save", async function (next) {
   if (!this.isNew) return next(); 
