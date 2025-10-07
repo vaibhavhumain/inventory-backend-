@@ -27,6 +27,7 @@ const itemSchema = new mongoose.Schema(
     subDescription: { type: String },
     unit: { type: String, default: "pcs" },
     hsnCode: { type: String },
+    gstRate: { type: Number, default: 0 }, 
     remarks: { type: String },
     vendor: {
       type: mongoose.Schema.Types.ObjectId,

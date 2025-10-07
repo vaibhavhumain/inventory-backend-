@@ -12,11 +12,11 @@ const invoiceItemSchema = new mongoose.Schema(
     subQuantityMeasurement: { type: String },
     rate: { type: Number, required: true },
     amount: { type: Number },
-    gstRate: { type: Number },
     notes: { type: String },
 
-    // ✅ New: store snapshot of item's HSN at the time of purchase
     hsnSnapshot: { type: String },
+    gstSnapshot: { type: Number },
+
   },
   { _id: false }
 );

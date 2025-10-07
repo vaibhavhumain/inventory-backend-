@@ -34,7 +34,7 @@ async function generateItemCode(category) {
     newCode = `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
   }
   return newCode;
-}
+}                                                                 
 
 async function processItems(items) {
   let totalTaxableValue = 0;
@@ -48,7 +48,6 @@ async function processItems(items) {
     const safeCategory = it.category?.toLowerCase().trim() || "raw material";
     const amount = (it.subQuantity || 0) * (it.rate || 0);
     totalTaxableValue += amount;
-    if (it.gstRate) gstTotal += (amount * it.gstRate) / 100;
 
     let existingItem = await Item.findOne({ headDescription });
     if (!existingItem) {
@@ -60,6 +59,7 @@ async function processItems(items) {
         subDescription: it.subDescription || "",
         unit: it.subQuantityMeasurement,
         hsnCode: it.hsnCode,
+        gstRate: it.gstRate || 0,
         closingQty: it.subQuantity,
         mainStoreQty: it.subQuantity,
         remarks: it.notes || null,
@@ -89,6 +89,9 @@ async function processItems(items) {
       await existingItem.save();
     }
 
+    const gstRate = existingItem.gstRate || 0;
+    gstTotal += (amount * gstRate) / 100;
+
     processedItems.push({
       item: existingItem._id,
       overrideDescription: it.overrideDescription || headDescription,
@@ -96,10 +99,10 @@ async function processItems(items) {
       headQuantityMeasurement: it.headQuantityMeasurement,
       subQuantity: it.subQuantity,
       subQuantityMeasurement: it.subQuantityMeasurement,
-      hsnSnapshot: existingItem.hsnCode || "",
       rate: it.rate,
       amount,
-      gstRate: it.gstRate,
+      hsnSnapshot: existingItem.hsnCode || "",
+      gstSnapshot: gstRate, 
       notes: it.notes,
     });
   }
@@ -178,7 +181,7 @@ exports.getPurchaseInvoices = async (req, res) => {
   try {
     const invoices = await PurchaseInvoice.find()
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "_id code headDescription subDescription category hsnCode");
+      .populate("items.item", "_id code headDescription subDescription category hsnCode gstRate");
     res.status(200).json(invoices);
   } catch (error) {
     res.status(500).json({ error: "Server error" });
@@ -189,7 +192,7 @@ exports.getPurchaseInvoiceById = async (req, res) => {
   try {
     const invoice = await PurchaseInvoice.findById(req.params.id)
       .populate("vendor", "code name gstNumber")
-      .populate("items.item", "_id code headDescription subDescription category hsnCode");
+      .populate("items.item", "_id code headDescription subDescription category hsnCode gstRate");
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.status(200).json(invoice);
   } catch (error) {
@@ -290,10 +293,10 @@ exports.getInvoiceReport = async (req, res) => {
             ItemHeadDescription: it.item?.headDescription || "",
             ItemSubDescription: it.item?.subDescription || "",
             HSN: it.hsnSnapshot || it.item?.hsnCode || "",
+            GST: it.gstSnapshot || it.item?.gstRate || 0,
             Quantity: it.subQuantity,
             Rate: it.rate,
             Amount: it.amount,
-            GST: it.gstRate,
           }))
         );
       } else {
@@ -351,7 +354,7 @@ exports.getItemHistoryFromInvoices = async (req, res) => {
           quantity: it.subQuantity,
           rate: it.rate,
           amount: it.amount,
-          gstRate: it.gstRate,
+          gstRate: it.gstSnapshot || it.item?.gstRate || 0,
         }))
     );
 
