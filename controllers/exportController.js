@@ -4,7 +4,6 @@ const IssueBill = require("../models/issueBill");
 const Bus = require("../models/Bus");
 const Vendor = require("../models/vendor");
 const Item = require("../models/item");
-const InventoryTransaction = require("../models/InventoryTransaction");
 const { getAllItemsSummary } = require("../services/Stock");
 
 const IST = "Asia/Kolkata";
@@ -12,7 +11,7 @@ const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
 
 exports.exportData = async (req, res) => {
   try {
-    let { from, to, itemId } = req.query;
+    let { from, to } = req.query;
 
     if (!from) {
       return res.status(400).json({ error: "Please provide ?from=YYYY-MM-DD" });
@@ -27,7 +26,7 @@ exports.exportData = async (req, res) => {
     }
 
     // --- Fetch data
-    const [purchaseInvoices, inventorySummary, issueBills, buses, vendors, items] =
+    const [purchaseInvoices, inventorySummaryRaw, issueBills, buses, vendors, items] =
       await Promise.all([
         PurchaseInvoice.find({ createdAt: { $gte: startDate, $lte: endDate } })
           .populate("items.item", "code headDescription subDescription unit hsnCode")
@@ -41,6 +40,35 @@ exports.exportData = async (req, res) => {
         Vendor.find().lean(),
         Item.find().lean(),
       ]);
+
+    // ✅ Aggregate totals per item for cleaner summary
+    const inventorySummary = Object.values(
+      inventorySummaryRaw.reduce((acc, r) => {
+        const key = r.itemCode || "UNKNOWN";
+        if (!acc[key]) {
+          acc[key] = {
+            itemCode: r.itemCode,
+            description: r.description,
+            unit: r.unit || "",
+            purchaseQty: 0,
+            issueQty: 0,
+            consumptionQty: 0,
+            saleQty: 0,
+            closingMain: 0,
+            closingSub: 0,
+            closingTotal: 0,
+          };
+        }
+        acc[key].purchaseQty += r.purchaseQty || 0;
+        acc[key].issueQty += r.issueQty || 0;
+        acc[key].consumptionQty += r.consumptionQty || 0;
+        acc[key].saleQty += r.saleQty || 0;
+        acc[key].closingMain = r.closingMain || acc[key].closingMain;
+        acc[key].closingSub = r.closingSub || acc[key].closingSub;
+        acc[key].closingTotal = r.closingTotal || acc[key].closingTotal;
+        return acc;
+      }, {})
+    );
 
     const workbook = new ExcelJS.Workbook();
 
@@ -94,18 +122,19 @@ exports.exportData = async (req, res) => {
       });
     });
 
-    // ---------------- Inventory Summary ----------------
+    // ---------------- ✅ Inventory Summary (Fixed) ----------------
     const invSheet = workbook.addWorksheet("Inventory Summary");
     invSheet.columns = [
-      { header: "Item", key: "itemName", width: 22 },
+      { header: "Item Code", key: "itemCode", width: 16 },
+      { header: "Description", key: "description", width: 26 },
       { header: "Unit", key: "unit", width: 12 },
-      { header: "Purchase (In)", key: "purchaseIn", width: 18 },
-      { header: "Issue to Sub Store", key: "issueToSub", width: 20 },
-      { header: "Consumption", key: "consumption", width: 18 },
-      { header: "Sale", key: "sale", width: 18 },
-      { header: "Balance Main", key: "balanceMainStore", width: 20 },
-      { header: "Balance Sub", key: "balanceSubStore", width: 20 },
-      { header: "Balance Total", key: "balanceTotal", width: 22 },
+      { header: "Purchase (In)", key: "purchaseQty", width: 18 },
+      { header: "Issue to Sub Store", key: "issueQty", width: 20 },
+      { header: "Consumption", key: "consumptionQty", width: 18 },
+      { header: "Sale", key: "saleQty", width: 18 },
+      { header: "Balance Main", key: "closingMain", width: 20 },
+      { header: "Balance Sub", key: "closingSub", width: 20 },
+      { header: "Balance Total", key: "closingTotal", width: 22 },
     ];
     inventorySummary.forEach((s) => invSheet.addRow(s));
 
