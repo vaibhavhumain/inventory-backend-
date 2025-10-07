@@ -5,12 +5,24 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const Bus = require("../models/Bus");
 
+// ✅ Create Item
 exports.createItem = async (req, res) => {
   try {
-    const { category, headDescription, subDescription, unit, hsnCode, remarks, vendor } = req.body;
+    const {
+      category,
+      headDescription,
+      subDescription,
+      unit,
+      hsnCode,
+      gstRate,        
+      remarks,
+      vendor,
+    } = req.body;
 
-    if (!headDescription) return res.status(400).json({ error: "headDescription is required" });
-    if (!category) return res.status(400).json({ error: "category is required" });
+    if (!headDescription)
+      return res.status(400).json({ error: "headDescription is required" });
+    if (!category)
+      return res.status(400).json({ error: "category is required" });
 
     const newItem = new Item({
       category,
@@ -18,6 +30,7 @@ exports.createItem = async (req, res) => {
       subDescription,
       unit: unit || "pcs",
       hsnCode,
+      gstRate: Number(gstRate) || 0, 
       remarks,
       vendor,
     });
@@ -30,15 +43,20 @@ exports.createItem = async (req, res) => {
   }
 };
 
+// ✅ Get All Items
 exports.getItems = async (req, res) => {
   try {
-    const items = await Item.find();
+    const items = await Item.find(
+      {},
+      "code category headDescription subDescription unit hsnCode gstRate remarks vendor"
+    ).populate("vendor", "name code gstNumber");
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
+// ✅ Delete Item
 exports.deleteItem = async (req, res) => {
   try {
     await Item.findByIdAndDelete(req.params.id);
@@ -48,6 +66,7 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
+// ✅ Item Overview (with latest HSN & GST)
 exports.getItemOverview = async (req, res) => {
   try {
     const { id } = req.params;
@@ -67,8 +86,11 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
-    const vendors = await Vendor.find({ _id: { $in: purchaseAgg.map((p) => p._id) } }).lean();
+    const vendors = await Vendor.find({
+      _id: { $in: purchaseAgg.map((p) => p._id) },
+    }).lean();
 
+    // Stock summary
     const txns = await InventoryTransaction.aggregate([
       { $match: { item: new mongoose.Types.ObjectId(id) } },
       {
@@ -87,6 +109,7 @@ exports.getItemOverview = async (req, res) => {
     });
     const currentStock = purchased - consumed;
 
+    // Bus-wise consumption summary
     const busAgg = await InventoryTransaction.aggregate([
       {
         $match: { item: new mongoose.Types.ObjectId(id), type: "CONSUMPTION" },
@@ -99,9 +122,14 @@ exports.getItemOverview = async (req, res) => {
       },
     ]);
 
-    const buses = await Bus.find({ _id: { $in: busAgg.map((b) => b._id) } }).lean();
+    const buses = await Bus.find({
+      _id: { $in: busAgg.map((b) => b._id) },
+    }).lean();
+
     const consumptionSummary = busAgg.map((bc) => {
-      const busDoc = buses.find((b) => b._id.toString() === bc._id?.toString());
+      const busDoc = buses.find(
+        (b) => b._id.toString() === bc._id?.toString()
+      );
       return {
         bus: busDoc
           ? {
@@ -116,25 +144,40 @@ exports.getItemOverview = async (req, res) => {
       };
     });
 
-    const purchaseHistory = await PurchaseInvoice.find({ "items.item": id })
+    // Purchase history (with GST + HSN)
+    const purchaseHistory = await PurchaseInvoice.find({
+      "items.item": id,
+    })
       .sort({ date: -1 })
       .populate("vendor", "name code")
-      .populate("items.item", "code headDescription subDescription unit hsnCode")
+      .populate(
+        "items.item",
+        "code headDescription subDescription unit hsnCode gstRate"
+      )
       .lean();
 
+    // Latest HSN & GST snapshot
     let latestHsnCode = item.hsnCode || null;
+    let latestGstRate = item.gstRate || 0;
+
     if (purchaseHistory.length > 0) {
       const latestInvoice = purchaseHistory[0];
-      const line = latestInvoice.items.find((it) => it.item?._id.toString() === id);
+      const line = latestInvoice.items.find(
+        (it) => it.item?._id.toString() === id
+      );
       if (line?.hsnSnapshot || line?.item?.hsnCode) {
         latestHsnCode = line.hsnSnapshot || line.item.hsnCode;
+      }
+      if (line?.gstSnapshot || line?.item?.gstRate) {
+        latestGstRate = line.gstSnapshot || line.item.gstRate;
       }
     }
 
     res.json({
       item: {
-        ...item.toObject?.() || item,
+        ...(item.toObject?.() || item),
         hsnCode: latestHsnCode,
+        gstRate: latestGstRate,
       },
       vendors: purchaseAgg.map((pa) => ({
         vendor: vendors.find((v) => v._id.equals(pa._id)),
@@ -152,13 +195,17 @@ exports.getItemOverview = async (req, res) => {
   }
 };
 
+// ✅ Item Ledger (unchanged)
 exports.getItemLedger = async (req, res) => {
   try {
     const { id } = req.params;
     const item = await Item.findById(id);
     if (!item) return res.status(404).json({ error: "Item not found" });
 
-    const txns = await InventoryTransaction.find({ item: id }).sort({ date: 1 }).lean();
+    const txns = await InventoryTransaction.find({ item: id })
+      .sort({ date: 1 })
+      .lean();
+
     if (!txns.length) return res.json({ item, ledger: [] });
 
     const byDay = {};
@@ -211,7 +258,8 @@ exports.getItemLedger = async (req, res) => {
       const closingSub = openingSub + issueQty - (consumptionQty + saleQty);
       const closingTotal = closingMain + closingSub;
 
-      const closingAmt = openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
+      const closingAmt =
+        openingAmt + purchaseAmt - issueAmt - consumptionAmt - saleAmt;
 
       ledger.push({
         date: d,
@@ -244,4 +292,3 @@ exports.getItemLedger = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
