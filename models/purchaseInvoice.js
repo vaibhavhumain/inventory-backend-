@@ -27,6 +27,7 @@ const purchaseInvoiceSchema = new mongoose.Schema(
 
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
     partyName: { type: String, required: true },
+    manualInvoiceDate: { type: Date },
 
     items: [invoiceItemSchema],
 
