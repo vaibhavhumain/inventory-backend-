@@ -280,7 +280,7 @@ exports.createMultiIssueBill = async (req, res) => {
           date: issueDate || new Date(),
           meta: {
             note: `Issued by ${userName} to ${issuedTo}`,
-            bus: bus.busCode,
+            bus : bus._id,
           },
         });
 
