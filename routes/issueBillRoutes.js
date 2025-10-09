@@ -5,10 +5,12 @@ const {
   createIssueBill,
   getIssueBills,
   getIssueBillById,
-} = require('../controllers/issueBillController');
+  createMultiIssueBill,
+  } = require('../controllers/issueBillController');
 const { protect } = require("../middleware/authMiddleware");
 router.post("/", protect, createIssueBill);
 router.get('/', getIssueBills);         
 router.get('/:id', getIssueBillById);    
+router.post("/multi", createMultiIssueBill);
 
 module.exports = router;

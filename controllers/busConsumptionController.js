@@ -1,12 +1,9 @@
 const Bus = require("../models/Bus");
 const IssueBill = require("../models/issueBill");
 
-// ✅ Create or update bus consumption (SUB_TO_USER only)
 exports.createBusConsumption = async (req, res) => {
   try {
     const { busCode, issueBillId, ownerName, chassisNo, engineNo, model } = req.body;
-
-    // 🔹 1. Validate required fields
     if (!busCode || !issueBillId) {
       return res
         .status(400)
