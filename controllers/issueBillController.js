@@ -5,7 +5,16 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 
 exports.createIssueBill = async (req, res) => {
   try {
-    const { issueDate, department, items, type, issuedTo, bus } = req.body;
+    const {
+      issueDate,
+      department,
+      items,
+      type,
+      issuedTo,
+      bus,
+      voucherNumber,
+      voucherDate,
+    } = req.body;
 
     // ✅ Basic validation
     if (!department || !items || items.length === 0 || !type) {
@@ -90,6 +99,13 @@ exports.createIssueBill = async (req, res) => {
       });
     }
 
+    // ✅ Auto-generate voucher number if not provided
+    let finalVoucherNumber = voucherNumber;
+    if (!finalVoucherNumber) {
+      const count = await IssueBill.countDocuments();
+      finalVoucherNumber = `ISS-${String(count + 1).padStart(4, "0")}`;
+    }
+
     // ✅ Create new IssueBill
     const newBill = new IssueBill({
       issueDate,
@@ -100,6 +116,8 @@ exports.createIssueBill = async (req, res) => {
         : undefined,
       items: processedItems,
       totalAmount,
+      voucherNumber: finalVoucherNumber,
+      voucherDate: voucherDate || new Date(),
       issuedBy: {
         id: userId,
         name: userName,
@@ -110,7 +128,6 @@ exports.createIssueBill = async (req, res) => {
 
     // ✅ Attach IssueBill to Bus (new structure)
     if (type === "SUB_TO_USER" && bus?.busCode) {
-      // Find or create Bus by busCode
       let existingBus = await Bus.findOne({ busCode: bus.busCode });
 
       if (existingBus) {
@@ -131,13 +148,15 @@ exports.createIssueBill = async (req, res) => {
       await newBill.save();
     }
 
-    res.status(201).json({ message: "✅ Issue Bill Created", bill: newBill });
+    res.status(201).json({
+      message: "✅ Issue Bill Created Successfully",
+      bill: newBill,
+    });
   } catch (error) {
     console.error("Error creating issue bill:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
-
 
 // ✅ Get all issue bills
 exports.getIssueBills = async (req, res) => {
