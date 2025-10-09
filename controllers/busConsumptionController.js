@@ -4,11 +4,13 @@ const IssueBill = require("../models/issueBill");
 // ✅ Create or update bus consumption (SUB_TO_USER only)
 exports.createBusConsumption = async (req, res) => {
   try {
-    const { busCode, issueBillId } = req.body;
+    const { busCode, issueBillId, ownerName, chassisNo, engineNo, model } = req.body;
 
     // 🔹 1. Validate required fields
     if (!busCode || !issueBillId) {
-      return res.status(400).json({ error: "Bus Code and Issue Bill ID are required." });
+      return res
+        .status(400)
+        .json({ error: "Bus Code and Issue Bill ID are required." });
     }
 
     // 🔹 2. Fetch Issue Bill
@@ -28,11 +30,18 @@ exports.createBusConsumption = async (req, res) => {
     let bus = await Bus.findOne({ busCode });
 
     if (bus) {
-      // ✅ If bus exists, link issue bill if not already linked
+      // ✅ Update bus details if any new info is provided
+      bus.ownerName = ownerName || bus.ownerName;
+      bus.chassisNo = chassisNo || bus.chassisNo;
+      bus.engineNo = engineNo || bus.engineNo;
+      bus.model = model || bus.model;
+
+      // ✅ Link issue bill if not already linked
       if (!bus.issueBills.includes(issueBill._id)) {
         bus.issueBills.push(issueBill._id);
-        await bus.save();
       }
+
+      await bus.save();
 
       return res.status(200).json({
         message: `Existing bus (${busCode}) updated and linked to issue bill.`,
@@ -43,6 +52,10 @@ exports.createBusConsumption = async (req, res) => {
     // 🔹 5. Create new Bus
     bus = new Bus({
       busCode,
+      ownerName,
+      chassisNo,
+      engineNo,
+      model,
       issueBills: [issueBill._id],
     });
 
@@ -93,6 +106,11 @@ exports.getBusConsumptionById = async (req, res) => {
     res.json({
       _id: bus._id,
       busCode: bus.busCode,
+      ownerName: bus.ownerName,
+      chassisNo: bus.chassisNo,
+      engineNo: bus.engineNo,
+      model: bus.model,
+      createdAt: bus.createdAt,
       issueBills: bus.issueBills.map((ib) => ({
         _id: ib._id,
         issueDate: ib.issueDate,

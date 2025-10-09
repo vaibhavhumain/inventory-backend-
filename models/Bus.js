@@ -4,10 +4,41 @@ const busSchema = new mongoose.Schema(
   {
     busCode: {
       type: String,
-      required: true, 
-      unique: true,  
+      required: true,
+      unique: true,
       trim: true,
     },
+
+    ownerName: {
+      type: String,
+      trim: true,
+    },
+
+    chassisNo: {
+      type: String,
+      trim: true,
+    },
+
+    engineNo: {
+      type: String,
+      trim: true,
+    },
+
+    model: {
+      type: String,
+      enum: [
+        "Spider (SP)",
+        "Hymer (HY)",
+        "Tourista (TO)",
+        "Kasper (KA)",
+        "Arrow (AR)",
+        "Semi Deluxe (SE)",
+        "Sleeper (SL)",
+        "Sleeper Seater (SS)",
+      ],
+      required: true,
+    },
+
     issueBills: [
       {
         type: mongoose.Schema.Types.ObjectId,
