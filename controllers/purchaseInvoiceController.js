@@ -357,3 +357,49 @@ exports.getInvoiceReport = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+// ✅ Get Item Purchase History
+exports.getItemHistoryFromInvoices = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const item = await Item.findOne({ code });
+    if (!item) return res.status(404).json({ error: "Item not found" });
+
+    const invoices = await PurchaseInvoice.find({ "items.item": item._id })
+      .sort({ date: -1 })
+      .populate("vendor", "code name gstNumber")
+      .populate("items.item", "code headDescription subDescription category hsnCode");
+
+    if (!invoices.length) return res.status(404).json({ error: "No history found" });
+
+    const supplierHistory = invoices.flatMap((inv) =>
+      inv.items
+        .filter((it) => String(it.item?._id) === String(item._id))
+        .map((it) => ({
+          date: inv.date,
+          invoiceNumber: inv.invoiceNumber,
+          supplierName: inv.partyName,
+          vendorCode: inv.vendor?.code || "",
+          vendorName: inv.vendor?.name || "",
+          description: it.overrideDescription,
+          hsnCode: it.hsnSnapshot || it.item?.hsnCode || "",
+          quantity: it.subQuantity,
+          rate: it.rate,
+          amount: it.amount,
+          gstRate: it.gstSnapshot || it.item?.gstRate || 0,
+        }))
+    );
+
+    res.json({
+      item: {
+        code: item.code,
+        headDescription: item.headDescription,
+        subDescription: item.subDescription,
+      },
+      supplierHistory,
+    });
+  } catch (error) {
+    console.error("Error fetching item history:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
