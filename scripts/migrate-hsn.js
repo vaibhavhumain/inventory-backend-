@@ -1,36 +1,41 @@
-require("dotenv").config();
 const mongoose = require("mongoose");
-const Item = require("../models/item"); 
+require("dotenv").config();
+const PurchaseInvoice = require("../models/purchaseInvoice");
+const InventoryTransaction = require("../models/InventoryTransaction");
 
 (async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
+    console.log("✅ Connected to DB");
 
-    const items = await Item.find({
-      $or: [{ gstRate: { $exists: false } }, { gstRate: { $eq: null } }],
-    });
+    const invoices = await PurchaseInvoice.find().populate("items.item");
+    let fixed = 0;
 
-    console.log(`Found ${items.length} items without gstRate`);
+    for (const inv of invoices) {
+      // Remove old txns
+      await InventoryTransaction.deleteMany({ "meta.invoice": inv._id });
 
-    let updatedCount = 0;
+      // Re-create transactions using only subQuantity
+      const txns = inv.items.map((it) => ({
+        item: it.item._id,
+        type: "PURCHASE",
+        quantity: it.subQuantity || 0,        // ✅ only sub qty
+        rate: it.rate || 0,
+        amount: (it.subQuantity || 0) * (it.rate || 0),
+        date: inv.date,
+        meta: { invoice: inv._id },
+      }));
 
-    for (const item of items) {
-      let defaultGst = 18;
-
-      if (item.category === "raw material") defaultGst = 5;
-      if (item.category === "consumables") defaultGst = 12;
-      if (item.category === "chemicals") defaultGst = 18;
-      if (item.category === "furniture") defaultGst = 28;
-
-      item.gstRate = defaultGst;
-      await item.save();
-      updatedCount++;
+      if (txns.length) {
+        await InventoryTransaction.insertMany(txns);
+        fixed++;
+      }
     }
 
-    console.log(`✅ Updated ${updatedCount} items successfully`);
-    process.exit(0);
+    console.log(`🎯 Rebuilt ${fixed} purchase invoices.`);
+    await mongoose.disconnect();
   } catch (err) {
-    console.error("❌ Error updating items:", err);
+    console.error(err);
     process.exit(1);
   }
 })();
