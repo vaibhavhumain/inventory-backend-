@@ -4,10 +4,12 @@ const IssueBill = require("../models/issueBill");
 const Bus = require("../models/Bus");
 const Vendor = require("../models/vendor");
 const Item = require("../models/item");
+const User = require("../models/User");
 const { getAllItemsSummary } = require("../services/Stock");
 
 const IST = "Asia/Kolkata";
-const fmt = (d) => new Date(d).toLocaleString("en-IN", { timeZone: IST });
+const fmt = (d) =>
+  d ? new Date(d).toLocaleString("en-IN", { timeZone: IST }) : "";
 
 exports.exportData = async (req, res) => {
   try {
@@ -25,23 +27,35 @@ exports.exportData = async (req, res) => {
       return res.status(400).json({ error: "Invalid date(s). Use YYYY-MM-DD." });
     }
 
-    // --- Fetch data
-    const [purchaseInvoices, inventorySummaryRaw, issueBills, buses, vendors, items] =
-      await Promise.all([
-        PurchaseInvoice.find({ createdAt: { $gte: startDate, $lte: endDate } })
-          .populate("items.item", "code headDescription subDescription unit hsnCode")
-          .lean(),
-        getAllItemsSummary(),
-        IssueBill.find({ issueDate: { $gte: startDate, $lte: endDate } })
-          .populate("items.item", "code headDescription")
-          .populate("bus")
-          .lean(),
-        Bus.find().populate("issueBills").lean(),
-        Vendor.find().lean(),
-        Item.find().lean(),
-      ]);
+    // --- Fetch all data
+    const [
+      purchaseInvoices,
+      inventorySummaryRaw,
+      issueBills,
+      buses,
+      vendors,
+      items,
+      users,
+    ] = await Promise.all([
+      PurchaseInvoice.find({ createdAt: { $gte: startDate, $lte: endDate } })
+        .populate("items.item", "code headDescription subDescription unit hsnCode")
+        .populate("vendor", "name code gstNumber")
+        .lean(),
 
-    // ✅ Aggregate totals per item for cleaner summary
+      getAllItemsSummary(),
+
+      IssueBill.find({ issueDate: { $gte: startDate, $lte: endDate } })
+        .populate("items.item", "code headDescription unit")
+        .populate("bus", "busCode ownerName")
+        .lean(),
+
+      Bus.find().populate("issueBills", "voucherNumber issueDate").lean(),
+      Vendor.find().lean(),
+      Item.find().populate("vendor", "name code gstNumber").lean(),
+      User.find().lean(),
+    ]);
+
+    // ✅ Clean up inventory summary
     const inventorySummary = Object.values(
       inventorySummaryRaw.reduce((acc, r) => {
         const key = r.itemCode || "UNKNOWN";
@@ -72,147 +86,196 @@ exports.exportData = async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
 
-    // ---------------- Purchase Invoices ----------------
+    // ---------------- 🧾 PURCHASE INVOICES ----------------
     const purchaseSheet = workbook.addWorksheet("Purchase Invoices");
     purchaseSheet.columns = [
       { header: "Invoice No", key: "invoiceNumber", width: 16 },
-      { header: "Party Name", key: "partyName", width: 28 },
-      { header: "Invoice Date", key: "date", width: 20 },
-      { header: "Total Taxable Value", key: "totalTaxableValue", width: 22 },
-      { header: "Total Invoice Value", key: "totalInvoiceValue", width: 22 },
+      { header: "Party Name", key: "partyName", width: 26 },
+      { header: "Vendor Code", key: "vendorCode", width: 16 },
+      { header: "Date", key: "date", width: 20 },
+      { header: "Taxable Value", key: "totalTaxableValue", width: 18 },
+      { header: "Total Value", key: "totalInvoiceValue", width: 18 },
     ];
-    purchaseInvoices.forEach((inv) => {
+    purchaseInvoices.forEach((inv) =>
       purchaseSheet.addRow({
         invoiceNumber: inv.invoiceNumber,
         partyName: inv.partyName,
-        date: inv.date ? fmt(inv.date) : "",
+        vendorCode: inv.vendor?.code || "",
+        date: fmt(inv.date),
         totalTaxableValue: inv.totalTaxableValue || 0,
         totalInvoiceValue: inv.totalInvoiceValue || 0,
-      });
-    });
+      })
+    );
 
-    // ---------------- Invoice Items ----------------
-    const itemSheet = workbook.addWorksheet("Invoice Items");
-    itemSheet.columns = [
+    // ---------------- 📦 INVOICE ITEMS ----------------
+    const invItemsSheet = workbook.addWorksheet("Invoice Items");
+    invItemsSheet.columns = [
       { header: "Invoice No", key: "invoiceNumber", width: 16 },
-      { header: "Party Name", key: "partyName", width: 28 },
+      { header: "Party Name", key: "partyName", width: 24 },
       { header: "Item Code", key: "code", width: 16 },
-      { header: "Item", key: "item", width: 22 },
-      { header: "Description", key: "description", width: 36 },
-      { header: "Qty", key: "subQuantity", width: 14 },
-      { header: "Unit", key: "subQuantityMeasurement", width: 14 },
-      { header: "Rate", key: "rate", width: 14 },
-      { header: "Amount", key: "amount", width: 18 },
-      { header: "HSN", key: "hsnCode", width: 16 },
+      { header: "Item", key: "item", width: 28 },
+      { header: "Qty", key: "qty", width: 10 },
+      { header: "Unit", key: "unit", width: 10 },
+      { header: "Rate", key: "rate", width: 12 },
+      { header: "Amount", key: "amount", width: 14 },
+      { header: "HSN Code", key: "hsnCode", width: 14 },
     ];
     purchaseInvoices.forEach((inv) => {
-      (inv.items || []).forEach((i) => {
-        itemSheet.addRow({
+      (inv.items || []).forEach((i) =>
+        invItemsSheet.addRow({
           invoiceNumber: inv.invoiceNumber,
           partyName: inv.partyName,
-          code: i.item?.code || "",
-          item: i.item?.headDescription || "",
-          description: i.overrideDescription || i.subDescription || "",
-          subQuantity: i.subQuantity,
-          subQuantityMeasurement: i.subQuantityMeasurement,
-          hsnCode: i.hsnCode,
+          code: i.item?.code,
+          item: i.item?.headDescription,
+          qty: i.subQuantity,
+          unit: i.subQuantityMeasurement,
           rate: i.rate,
           amount: i.amount,
-        });
-      });
-    });
-
-    // ---------------- ✅ Inventory Summary (Fixed) ----------------
-    const invSheet = workbook.addWorksheet("Inventory Summary");
-    invSheet.columns = [
-      { header: "Item Code", key: "itemCode", width: 16 },
-      { header: "Description", key: "description", width: 26 },
-      { header: "Unit", key: "unit", width: 12 },
-      { header: "Purchase (In)", key: "purchaseQty", width: 18 },
-      { header: "Issue to Sub Store", key: "issueQty", width: 20 },
-      { header: "Consumption", key: "consumptionQty", width: 18 },
-      { header: "Sale", key: "saleQty", width: 18 },
-      { header: "Balance Main", key: "closingMain", width: 20 },
-      { header: "Balance Sub", key: "closingSub", width: 20 },
-      { header: "Balance Total", key: "closingTotal", width: 22 },
-    ];
-    inventorySummary.forEach((s) => invSheet.addRow(s));
-
-    // ---------------- Issue Bills ----------------
-    const issueSheet = workbook.addWorksheet("Issue Bills");
-    issueSheet.columns = [
-      { header: "Date", key: "issueDate", width: 16 },
-      { header: "Department", key: "department", width: 20 },
-      { header: "Type", key: "type", width: 16 },
-      { header: "Item Code", key: "itemCode", width: 16 },
-      { header: "Item", key: "item", width: 24 },
-      { header: "Qty", key: "qty", width: 12 },
-      { header: "Rate", key: "rate", width: 14 },
-      { header: "Amount", key: "amount", width: 18 },
-      { header: "Bus", key: "bus", width: 20 },
-    ];
-    issueBills.forEach((b) => {
-      (b.items || []).forEach((it) =>
-        issueSheet.addRow({
-          issueDate: fmt(b.issueDate),
-          department: b.department,
-          type: b.type,
-          itemCode: it.item?.code,
-          item: it.item?.headDescription,
-          qty: it.quantity,
-          rate: it.rate,
-          amount: it.amount,
-          bus: b.bus?.chassisNumber || "",
+          hsnCode: i.hsnCode,
         })
       );
     });
 
-    // ---------------- Buses ----------------
+    // ---------------- 🧾 ISSUE BILLS ----------------
+    const issueSheet = workbook.addWorksheet("Issue Bills");
+    issueSheet.columns = [
+      { header: "Voucher No", key: "voucherNumber", width: 16 },
+      { header: "Voucher Date", key: "voucherDate", width: 20 },
+      { header: "Date", key: "issueDate", width: 20 },
+      { header: "Department", key: "department", width: 20 },
+      { header: "Type", key: "type", width: 16 },
+      { header: "Issued To", key: "issuedTo", width: 20 },
+      { header: "Issued By", key: "issuedBy", width: 20 },
+      { header: "Bus (Code - Owner)", key: "bus", width: 28 },
+      { header: "Item Code", key: "itemCode", width: 16 },
+      { header: "Item", key: "item", width: 26 },
+      { header: "Qty", key: "qty", width: 10 },
+      { header: "UQC", key: "unit", width: 10 },
+      { header: "Rate", key: "rate", width: 10 },
+      { header: "Amount", key: "amount", width: 14 },
+    ];
+    issueBills.forEach((b) => {
+      (b.items || []).forEach((it) =>
+        issueSheet.addRow({
+          voucherNumber: b.voucherNumber,
+          voucherDate: fmt(b.voucherDate),
+          issueDate: fmt(b.issueDate),
+          department: b.department,
+          type: b.type,
+          issuedTo: b.issuedTo || "-",
+          issuedBy: b.issuedBy?.name || "-",
+          bus: b.bus
+            ? `${b.bus.busCode || ""} - ${b.bus.ownerName || ""}`
+            : "-",
+          itemCode: it.item?.code,
+          item: it.item?.headDescription,
+          qty: it.quantity,
+          unit: it.item?.unit,
+          rate: it.rate,
+          amount: it.amount,
+        })
+      );
+    });
+
+    // ---------------- 📦 INVENTORY SUMMARY ----------------
+    const invSheet = workbook.addWorksheet("Inventory Summary");
+    invSheet.columns = [
+      { header: "Item Code", key: "itemCode", width: 16 },
+      { header: "Description", key: "description", width: 28 },
+      { header: "Unit", key: "unit", width: 10 },
+      { header: "Purchased", key: "purchaseQty", width: 14 },
+      { header: "Issued to Sub", key: "issueQty", width: 14 },
+      { header: "Consumed", key: "consumptionQty", width: 14 },
+      { header: "Sold", key: "saleQty", width: 14 },
+      { header: "Closing (Main)", key: "closingMain", width: 16 },
+      { header: "Closing (Sub)", key: "closingSub", width: 16 },
+      { header: "Total Closing", key: "closingTotal", width: 16 },
+    ];
+    inventorySummary.forEach((r) => invSheet.addRow(r));
+
+    // ---------------- 🚍 BUSES ----------------
     const busSheet = workbook.addWorksheet("Buses");
     busSheet.columns = [
-      { header: "Chassis No", key: "chassisNumber", width: 20 },
-      { header: "Engine No", key: "engineNumber", width: 20 },
-      { header: "Model", key: "model", width: 20 },
-      { header: "Remarks", key: "remarks", width: 30 },
-      { header: "Issue Bills Count", key: "issueBills", width: 18 },
+      { header: "Bus Code", key: "busCode", width: 20 },
+      { header: "Owner Name", key: "ownerName", width: 20 },
+      { header: "Chassis No", key: "chassisNo", width: 20 },
+      { header: "Engine No", key: "engineNo", width: 20 },
+      { header: "Model", key: "model", width: 10 },
+      { header: "Issue Bill Count", key: "issueBills", width: 18 },
     ];
     buses.forEach((b) =>
       busSheet.addRow({
-        chassisNumber: b.chassisNumber,
-        engineNumber: b.engineNumber,
+        busCode: b.busCode,
+        ownerName: b.ownerName,
+        chassisNo: b.chassisNo,
+        engineNo: b.engineNo,
         model: b.model,
-        remarks: b.remarks,
         issueBills: (b.issueBills || []).length,
       })
     );
 
-    // ---------------- Vendors ----------------
+    // ---------------- 🧾 VENDORS ----------------
     const vendorSheet = workbook.addWorksheet("Vendors");
     vendorSheet.columns = [
-      { header: "Code", key: "code", width: 16 },
-      { header: "Name", key: "name", width: 28 },
-      { header: "GST", key: "gstNumber", width: 20 },
+      { header: "Vendor Code", key: "code", width: 16 },
+      { header: "Name", key: "name", width: 26 },
+      { header: "GST Number", key: "gstNumber", width: 20 },
+      { header: "State", key: "state", width: 20 },
+      { header: "Address", key: "address", width: 30 },
     ];
-    vendors.forEach((v) =>
-      vendorSheet.addRow({
-        code: v.code,
-        name: v.name,
-        gstNumber: v.gstNumber,
+    vendors.forEach((v) => vendorSheet.addRow(v));
+
+    // ---------------- 🧱 ITEMS ----------------
+    const itemSheet = workbook.addWorksheet("Items");
+    itemSheet.columns = [
+      { header: "Code", key: "code", width: 16 },
+      { header: "Category", key: "category", width: 16 },
+      { header: "Head Description", key: "headDescription", width: 28 },
+      { header: "Sub Description", key: "subDescription", width: 28 },
+      { header: "Unit", key: "unit", width: 10 },
+      { header: "HSN", key: "hsnCode", width: 16 },
+      { header: "GST %", key: "gstRate", width: 10 },
+      { header: "Vendor", key: "vendor", width: 26 },
+      { header: "Main Store Qty", key: "mainStoreQty", width: 16 },
+      { header: "Sub Store Qty", key: "subStoreQty", width: 16 },
+      { header: "Closing Qty", key: "closingQty", width: 16 },
+    ];
+    items.forEach((i) =>
+      itemSheet.addRow({
+        code: i.code,
+        category: i.category,
+        headDescription: i.headDescription,
+        subDescription: i.subDescription,
+        unit: i.unit,
+        hsnCode: i.hsnCode,
+        gstRate: i.gstRate,
+        vendor: i.vendor?.name || "-",
+        mainStoreQty: i.mainStoreQty,
+        subStoreQty: i.subStoreQty,
+        closingQty: i.closingQty,
       })
     );
 
-    // ---------------- Items ----------------
-    const itemsSheet = workbook.addWorksheet("Items");
-    itemsSheet.columns = [
-      { header: "Code", key: "code", width: 16 },
-      { header: "Head Desc", key: "headDescription", width: 28 },
-      { header: "Sub Desc", key: "subDescription", width: 28 },
-      { header: "Unit", key: "unit", width: 12 },
-      { header: "HSN Code", key: "hsnCode", width: 18 },
+    // ---------------- 👤 USERS ----------------
+    const userSheet = workbook.addWorksheet("Users");
+    userSheet.columns = [
+      { header: "Name", key: "name", width: 20 },
+      { header: "Username", key: "username", width: 20 },
+      { header: "Email", key: "email", width: 26 },
+      { header: "Role", key: "role", width: 16 },
+      { header: "Created At", key: "createdAt", width: 22 },
     ];
-    items.forEach((i) => itemsSheet.addRow(i));
+    users.forEach((u) =>
+      userSheet.addRow({
+        name: u.name,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        createdAt: fmt(u.createdAt),
+      })
+    );
 
-    // ---------------- Styling ----------------
+    // 🧩 Apply styling
     workbook.eachSheet((ws) => {
       ws.getRow(1).font = { bold: true };
       ws.columns.forEach((col) => {
@@ -220,13 +283,14 @@ exports.exportData = async (req, res) => {
       });
     });
 
+    // ✅ Send file to client
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="portal-report-${from}_to_${to || from}.xlsx"`
+      `attachment; filename="complete-report-${from}_to_${to || from}.xlsx"`
     );
 
     await workbook.xlsx.write(res);
