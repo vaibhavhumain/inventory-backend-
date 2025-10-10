@@ -37,7 +37,6 @@ async function generateItemCode(category) {
   return newCode;
 }
 
-// ✅ Process all items of invoice
 async function processItems(items) {
   let totalTaxableValue = 0;
   let gstTotal = 0;
@@ -48,60 +47,69 @@ async function processItems(items) {
     if (!headDescription) throw new Error("Head Description is required");
 
     const safeCategory = it.category?.toLowerCase().trim() || "raw material";
-    const amount = (it.subQuantity || 0) * (it.rate || 0);
+    const subQty = Number(it.subQuantity) || 0;
+    const rate = Number(it.rate) || 0;
+    const amount = subQty * rate;
     totalTaxableValue += amount;
 
-    let existingItem = await Item.findOne({ headDescription });
+    let existingItem = await Item.findOne({ headDescription: headDescription.trim() });
+
+    // 🟢 If item does not exist → create new
     if (!existingItem) {
       const code = await generateItemCode(safeCategory);
       existingItem = new Item({
         code,
         category: safeCategory,
-        headDescription,
+        headDescription: headDescription.trim(),
         subDescription: it.subDescription || "",
         unit: it.subQuantityMeasurement,
-        hsnCode: it.hsnCode,
-        gstRate: it.gstRate || 0,
-        closingQty: it.subQuantity,
-        mainStoreQty: it.subQuantity,
+        hsnCode: it.hsnCode || "",
+        gstRate: Number(it.gstRate) || 0,
+        closingQty: subQty,
+        mainStoreQty: subQty,
         remarks: it.notes || null,
         dailyStock: [
           {
             date: new Date(),
-            in: it.subQuantity,
+            in: subQty,
             out: 0,
-            closingQty: it.subQuantity,
-            mainStoreQty: it.subQuantity,
+            closingQty: subQty,
+            mainStoreQty: subQty,
             subStoreQty: 0,
           },
         ],
       });
       await existingItem.save();
     } else {
-      existingItem.closingQty += it.subQuantity || 0;
-      existingItem.mainStoreQty += it.subQuantity || 0;
+      // 🧮 Safe numeric conversions before math
+      const prevClosing = Number(existingItem.closingQty || 0);
+      const prevMain = Number(existingItem.mainStoreQty || 0);
+
+      existingItem.closingQty = prevClosing + subQty;
+      existingItem.mainStoreQty = prevMain + subQty;
+
       existingItem.dailyStock.push({
         date: new Date(),
-        in: it.subQuantity || 0,
+        in: subQty,
         out: 0,
         closingQty: existingItem.closingQty,
         mainStoreQty: existingItem.mainStoreQty,
-        subStoreQty: existingItem.subStoreQty || 0,
+        subStoreQty: Number(existingItem.subStoreQty || 0),
       });
       await existingItem.save();
     }
 
-    const gstRate = existingItem.gstRate || 0;
+    const gstRate = Number(existingItem.gstRate) || 0;
     gstTotal += (amount * gstRate) / 100;
 
     processedItems.push({
       item: existingItem._id,
-      overrideDescription: it.overrideDescription || headDescription,
-      headQuantity: it.headQuantity,
+      overrideDescription: it.overrideDescription || headDescription.trim(),
+      headQuantity: Number(it.headQuantity) || 0,
       headQuantityMeasurement: it.headQuantityMeasurement,
-      subQuantity: it.subQuantity,
+      subQuantity: subQty,
       subQuantityMeasurement: it.subQuantityMeasurement,
-      rate: it.rate,
+      rate,
       amount,
       hsnSnapshot: existingItem.hsnCode || "",
       gstSnapshot: gstRate,
@@ -114,6 +122,9 @@ async function processItems(items) {
 
 // ✅ Create Purchase Invoice
 exports.createPurchaseInvoice = async (req, res) => {
+  const session = await PurchaseInvoice.startSession();
+  session.startTransaction();
+
   try {
     const {
       invoiceNumber,
@@ -137,55 +148,66 @@ exports.createPurchaseInvoice = async (req, res) => {
     const { processedItems, totalTaxableValue, gstTotal } = await processItems(items);
 
     const beforeTaxPercentValue =
-      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
-    const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
+      (totalTaxableValue * (Number(otherChargesBeforeTaxPercent) || 0)) / 100;
+    const beforeTaxFixedValue = Number(otherChargesBeforeTaxAmount) || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
     const beforeTaxGst =
-      (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
+      (beforeTaxTotal * (Number(otherChargesBeforeTaxGstRate) || 0)) / 100;
 
     const totalInvoiceValue =
       totalTaxableValue +
       beforeTaxTotal +
       gstTotal +
       beforeTaxGst +
-      (otherChargesAfterTax || 0);
+      (Number(otherChargesAfterTax) || 0);
 
     const newInvoice = new PurchaseInvoice({
       invoiceNumber,
       date: date || new Date(),
-      manualInvoiceDate: manualInvoiceDate || null, // ✅ added
+      manualInvoiceDate: manualInvoiceDate || null,
       vendor,
       partyName,
       items: processedItems,
       otherChargesBeforeTaxAmount: beforeTaxFixedValue,
-      otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
-      otherChargesBeforeTaxGstRate: otherChargesBeforeTaxGstRate || 0,
-      otherChargesAfterTax: otherChargesAfterTax || 0,
+      otherChargesBeforeTaxPercent: Number(otherChargesBeforeTaxPercent) || 0,
+      otherChargesBeforeTaxGstRate: Number(otherChargesBeforeTaxGstRate) || 0,
+      otherChargesAfterTax: Number(otherChargesAfterTax) || 0,
       totalTaxableValue: totalTaxableValue + beforeTaxTotal,
       totalInvoiceValue,
     });
 
-    await newInvoice.save();
+    await newInvoice.save({ session });
 
+    // ✅ Add Inventory Transactions
     for (const it of processedItems) {
-      const lineAmount = (it.subQuantity || 0) * (it.rate || 0);
-      await InventoryTransaction.create({
-        item: it.item,
-        type: "PURCHASE",
-        quantity: it.subQuantity,
-        rate: it.rate,
-        amount: lineAmount,
-        date: new Date(date) || new Date(),
-        meta: { invoice: newInvoice._id },
-      });
+      const lineAmount = (Number(it.subQuantity) || 0) * (Number(it.rate) || 0);
+      await InventoryTransaction.create(
+        [
+          {
+            item: it.item,
+            type: "PURCHASE",
+            quantity: Number(it.subQuantity) || 0,
+            rate: Number(it.rate) || 0,
+            amount: lineAmount,
+            date: new Date(date) || new Date(),
+            meta: { invoice: newInvoice._id },
+          },
+        ],
+        { session }
+      );
     }
 
+    await session.commitTransaction();
     res.status(201).json({ message: "Purchase Invoice Added", invoice: newInvoice });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error adding purchase invoice:", error);
     res.status(500).json({ error: error.message });
+  } finally {
+    session.endSession();
   }
 };
+
 
 // ✅ Get All Invoices
 exports.getPurchaseInvoices = async (req, res) => {
@@ -214,8 +236,11 @@ exports.getPurchaseInvoiceById = async (req, res) => {
 
 // ✅ Update Invoice
 exports.updatePurchaseInvoice = async (req, res) => {
+  const session = await PurchaseInvoice.startSession();
+  session.startTransaction();
+
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await PurchaseInvoice.findById(req.params.id).session(session);
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
 
     const {
@@ -228,50 +253,79 @@ exports.updatePurchaseInvoice = async (req, res) => {
       ...rest
     } = req.body;
 
-    let processedItems = invoice.items;
-    let totalTaxableValue = invoice.totalTaxableValue;
-    let gstTotal = 0;
-
-    if (items?.length) {
-      const processed = await processItems(items);
-      processedItems = processed.processedItems;
-      totalTaxableValue = processed.totalTaxableValue;
-      gstTotal = processed.gstTotal;
+    // 🧹 Reverse previous stock effect
+    for (const old of invoice.items) {
+      const itemDoc = await Item.findById(old.item).session(session);
+      if (itemDoc) {
+        itemDoc.closingQty = Number(itemDoc.closingQty || 0) - Number(old.subQuantity || 0);
+        itemDoc.mainStoreQty = Number(itemDoc.mainStoreQty || 0) - Number(old.subQuantity || 0);
+        await itemDoc.save({ session });
+      }
     }
 
+    // 🧮 Reprocess new items
+    const { processedItems, totalTaxableValue, gstTotal } = await processItems(items);
+
     const beforeTaxPercentValue =
-      (totalTaxableValue * (otherChargesBeforeTaxPercent || 0)) / 100;
-    const beforeTaxFixedValue = otherChargesBeforeTaxAmount || 0;
+      (totalTaxableValue * (Number(otherChargesBeforeTaxPercent) || 0)) / 100;
+    const beforeTaxFixedValue = Number(otherChargesBeforeTaxAmount) || 0;
     const beforeTaxTotal = beforeTaxFixedValue + beforeTaxPercentValue;
     const beforeTaxGst =
-      (beforeTaxTotal * (otherChargesBeforeTaxGstRate || 0)) / 100;
+      (beforeTaxTotal * (Number(otherChargesBeforeTaxGstRate) || 0)) / 100;
 
     const totalInvoiceValue =
       totalTaxableValue +
       beforeTaxTotal +
       gstTotal +
       beforeTaxGst +
-      (otherChargesAfterTax || 0);
+      (Number(otherChargesAfterTax) || 0);
 
+    // 🆕 Update Invoice
     invoice.set({
       ...rest,
-      manualInvoiceDate: manualInvoiceDate || invoice.manualInvoiceDate, // ✅ added
+      manualInvoiceDate: manualInvoiceDate || invoice.manualInvoiceDate,
       items: processedItems,
       otherChargesBeforeTaxAmount: beforeTaxFixedValue,
-      otherChargesBeforeTaxPercent: otherChargesBeforeTaxPercent || 0,
-      otherChargesBeforeTaxGstRate: otherChargesBeforeTaxGstRate || 0,
-      otherChargesAfterTax: otherChargesAfterTax || 0,
+      otherChargesBeforeTaxPercent: Number(otherChargesBeforeTaxPercent) || 0,
+      otherChargesBeforeTaxGstRate: Number(otherChargesBeforeTaxGstRate) || 0,
+      otherChargesAfterTax: Number(otherChargesAfterTax) || 0,
       totalTaxableValue: totalTaxableValue + beforeTaxTotal,
       totalInvoiceValue,
     });
 
-    await invoice.save();
+    await invoice.save({ session });
+
+    // 🧾 Refresh inventory transactions
+    await InventoryTransaction.deleteMany({ 'meta.invoice': invoice._id }).session(session);
+    for (const it of processedItems) {
+      const lineAmount = (Number(it.subQuantity) || 0) * (Number(it.rate) || 0);
+      await InventoryTransaction.create(
+        [
+          {
+            item: it.item,
+            type: "PURCHASE",
+            quantity: Number(it.subQuantity) || 0,
+            rate: Number(it.rate) || 0,
+            amount: lineAmount,
+            date: new Date(invoice.date),
+            meta: { invoice: invoice._id },
+          },
+        ],
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
     res.status(200).json({ message: "Purchase Invoice Updated", invoice });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error updating invoice:", error);
     res.status(500).json({ error: error.message });
+  } finally {
+    session.endSession();
   }
 };
+
 
 // ✅ Delete Invoice
 exports.deletePurchaseInvoice = async (req, res) => {
