@@ -4,49 +4,44 @@ const IssueBill = require("../models/issueBill");
 exports.createBusConsumption = async (req, res) => {
   try {
     const { busCode, issueBillId, ownerName, chassisNo, engineNo, model } = req.body;
+
     if (!busCode || !issueBillId) {
       return res
         .status(400)
         .json({ error: "Bus Code and Issue Bill ID are required." });
     }
 
-    // 🔹 2. Fetch Issue Bill
+    // Fetch Issue Bill
     const issueBill = await IssueBill.findById(issueBillId);
-    if (!issueBill) {
-      return res.status(404).json({ error: "IssueBill not found." });
-    }
+    if (!issueBill) return res.status(404).json({ error: "Issue Bill not found." });
 
-    // 🔹 3. Validate type (only SUB_TO_USER)
     if (issueBill.type !== "SUB_TO_USER") {
       return res.status(400).json({
         error: "Bus consumption allowed only for SUB_TO_USER issue bills.",
       });
     }
 
-    // 🔹 4. Check if Bus already exists
+    // Find or update existing bus
     let bus = await Bus.findOne({ busCode });
 
     if (bus) {
-      // ✅ Update bus details if any new info is provided
       bus.ownerName = ownerName || bus.ownerName;
       bus.chassisNo = chassisNo || bus.chassisNo;
       bus.engineNo = engineNo || bus.engineNo;
       bus.model = model || bus.model;
 
-      // ✅ Link issue bill if not already linked
       if (!bus.issueBills.includes(issueBill._id)) {
         bus.issueBills.push(issueBill._id);
       }
 
       await bus.save();
-
       return res.status(200).json({
         message: `Existing bus (${busCode}) updated and linked to issue bill.`,
         bus,
       });
     }
 
-    // 🔹 5. Create new Bus
+    // Create new Bus
     bus = new Bus({
       busCode,
       ownerName,
@@ -75,7 +70,11 @@ exports.getBusConsumptions = async (req, res) => {
       .populate({
         path: "issueBills",
         model: "IssueBill",
-        populate: [{ path: "items.item", model: "Item" }],
+        populate: {
+          path: "items.item",
+          model: "Item",
+          select: "code headDescription subDescription unit", // ✅ Select these fields
+        },
       })
       .sort({ createdAt: -1 });
 
@@ -93,7 +92,11 @@ exports.getBusConsumptionById = async (req, res) => {
       .populate({
         path: "issueBills",
         model: "IssueBill",
-        populate: [{ path: "items.item", model: "Item" }],
+        populate: {
+          path: "items.item",
+          model: "Item",
+          select: "code headDescription subDescription unit", // ✅ Ensure these fields are included
+        },
       });
 
     if (!bus) {
@@ -118,7 +121,7 @@ exports.getBusConsumptionById = async (req, res) => {
         totalAmount: ib.totalAmount,
         items: ib.items.map((it) => ({
           code: it.item?.code || "-",
-          description: it.item?.headDescription || "",
+          description: it.item?.headDescription || it.item?.subDescription || "-",
           uqc: it.item?.unit || "-",
           quantity: it.quantity,
           rate: it.rate,
