@@ -80,34 +80,5 @@ purchaseInvoiceSchema.pre('save', async function (next) {
     next(err);
   }
 });
-
-// ✅ POST-SAVE HOOK — only subQuantity is counted in stock
-purchaseInvoiceSchema.post('save', async function (doc, next) {
-  try {
-    await InventoryTransaction.deleteMany({ 'meta.invoice': doc._id });
-
-    if (doc.items?.length) {
-      const txns = doc.items.map((it) => ({
-        item: it.item,
-        type: 'PURCHASE',
-        quantity: it.subQuantity || 0, // ✅ only subQuantity
-        rate: it.rate || 0,
-        amount: (it.subQuantity || 0) * (it.rate || 0),
-        date: doc.date,
-        meta: { invoice: doc._id },
-      }));
-
-      if (txns.length) {
-        await InventoryTransaction.insertMany(txns);
-        console.log(`✅ Created ${txns.length} PURCHASE transactions (subQuantity only)`);
-      }
-    }
-
-    next();
-  } catch (err) {
-    console.error('❌ Error in post-save transaction creation:', err);
-    next(err);
-  }
-});
-
 module.exports = mongoose.model('PurchaseInvoice', purchaseInvoiceSchema);
+           
