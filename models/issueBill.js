@@ -15,7 +15,6 @@ const issueBillSchema = new mongoose.Schema(
     issueDate: { type: Date, default: Date.now },
     department: { type: String, required: true },
 
-    // ✅ Added voucher fields
     voucherNumber: {
       type: String,
       required: true,

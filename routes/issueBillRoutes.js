@@ -11,6 +11,6 @@ const { protect } = require("../middleware/authMiddleware");
 router.post("/", protect, createIssueBill);
 router.get('/', getIssueBills);         
 router.get('/:id', getIssueBillById);    
-router.post("/multi", createMultiIssueBill);
+router.post("/multi", protect, createMultiIssueBill);
 
 module.exports = router;
