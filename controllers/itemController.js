@@ -43,18 +43,41 @@ exports.createItem = async (req, res) => {
   }
 };
 
-// ✅ Get All Items
+// ✅ Get All Items with Latest Purchase Rate
 exports.getItems = async (req, res) => {
   try {
     const items = await Item.find(
       {},
       "code category headDescription subDescription unit hsnCode gstRate remarks vendor"
     ).populate("vendor", "name code gstNumber");
-    res.json(items);
+
+    const enrichedItems = await Promise.all(
+      items.map(async (item) => {
+        const latestPurchase = await PurchaseInvoice.aggregate([
+          { $unwind: "$items" },
+          { $match: { "items.item": new mongoose.Types.ObjectId(item._id) } },
+          { $sort: { date: -1 } },
+          { $limit: 1 },
+          { $project: { rate: "$items.rate" } },
+        ]);
+
+        const lastPurchaseRate =
+          latestPurchase.length > 0 ? latestPurchase[0].rate : 0;
+
+        return {
+          ...item.toObject(),
+          lastPurchaseRate,
+        };
+      })
+    );
+
+    res.json(enrichedItems);
   } catch (err) {
+    console.error("Error in getItems:", err);
     res.status(500).json({ error: err.message });
   }
 };
+
 
 // ✅ Delete Item
 exports.deleteItem = async (req, res) => {
