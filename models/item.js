@@ -1,55 +1,53 @@
+// models/Item.js
 const mongoose = require("mongoose");
 const Counter = require("./Counter");
 const Category = require("./Category");
 
-const itemSchema = new mongoose.Schema(
-  {
-    code: { type: String, unique: true, index: true },
-    category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true }, 
-    headDescription: { type: String, required: true },
-    subDescription: { type: String },
-    unit: { type: String, default: "pcs" },
-    hsnCode: { type: String },
-    gstRate: { type: Number, default: 0 },
-    remarks: { type: String },
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
-    closingQty: { type: Number, default: 0 },
-    mainStoreQty: { type: Number, default: 0 },
-    subStoreQty: { type: Number, default: 0 },
-    dailyStock: [
-      {
-        date: { type: Date, default: Date.now },
-        in: Number,
-        out: Number,
-        closingQty: Number,
-        mainStoreQty: Number,
-        subStoreQty: Number,
-      },
-    ],
-  },
-  { timestamps: true }
-);
+const itemSchema = new mongoose.Schema({
+  code: { type: String, unique: true },
+  category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
+  headDescription: { type: String, required: true },
+  subDescription: String,
+  hsnCode: String,
+  gstRate: { type: Number, default: 0 },
+}, { timestamps: true });
 
-itemSchema.pre("validate", async function (next) {
+async function generateUniqueCode(categoryId) {
+  const cat = await Category.findById(categoryId).lean();
+  if (!cat?.prefix) throw new Error("Invalid category or missing prefix");
+
+  const prefix = cat.prefix;
+  let code = "";
+  let attempts = 0;
+
+  while (attempts < 10) { // 10 retries max
+    const counter = await Counter.findOneAndUpdate(
+      { name: prefix },
+      { $inc: { seq: 1 }, $setOnInsert: { name: prefix } },
+      { new: true, upsert: true }
+    );
+
+    code = `${prefix}/${String(counter.seq).padStart(4, "0")}`;
+
+    // ✅ Check if this code already exists
+    const exists = await mongoose.models.Item.exists({ code });
+    if (!exists) return code;
+
+    console.warn(`Duplicate ${code} detected — retrying...`);
+    attempts++;
+  }
+
+  throw new Error(`Failed to generate unique code for prefix ${prefix}`);
+}
+
+itemSchema.pre("save", async function (next) {
   try {
     if (this.code) return next();
-    if (!this.category) return next(new Error("Category is required for code generation"));
-
-    const cat = await Category.findById(this.category).lean();
-    if (!cat?.prefix) return next(new Error("Invalid category (prefix missing)"));
-
-    const c = await Counter.findOneAndUpdate(
-      { category: cat._id },                                   
-      { $inc: { seq: 1 }, $setOnInsert: { category: cat._id } }, 
-      { new: true, upsert: true }
-    ).lean();
-
-    this.code = `${cat.prefix}/${String(c.seq).padStart(4, "0")}`;
+    this.code = await generateUniqueCode(this.category);
     next();
   } catch (err) {
     next(err);
   }
 });
-
 
 module.exports = mongoose.model("Item", itemSchema);
