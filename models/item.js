@@ -1,40 +1,55 @@
 const mongoose = require("mongoose");
 const Counter = require("./Counter");
+const Category = require("./Category");
 
-const itemSchema = new mongoose.Schema({
-  code: { type: String, unique: true },     // e.g. RM/0001
-  category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
-  headDescription: { type: String, required: true },
-  subDescription: { type: String },
-  unit: { type: String, default: "pcs" },
-  hsnCode: { type: String },
-  gstRate: { type: Number, default: 0 },
-  remarks: { type: String },
-  vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
-  closingQty: { type: Number, default: 0 },
-  mainStoreQty: { type: Number, default: 0 },
-  subStoreQty: { type: Number, default: 0 },
-  dailyStock: [{
-    date: { type: Date, default: Date.now },
-    in: Number, out: Number,
-    closingQty: Number, mainStoreQty: Number, subStoreQty: Number,
-  }],
-}, { timestamps: true });
+const itemSchema = new mongoose.Schema(
+  {
+    code: { type: String, unique: true, index: true },
+    category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true }, 
+    headDescription: { type: String, required: true },
+    subDescription: { type: String },
+    unit: { type: String, default: "pcs" },
+    hsnCode: { type: String },
+    gstRate: { type: Number, default: 0 },
+    remarks: { type: String },
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
+    closingQty: { type: Number, default: 0 },
+    mainStoreQty: { type: Number, default: 0 },
+    subStoreQty: { type: Number, default: 0 },
+    dailyStock: [
+      {
+        date: { type: Date, default: Date.now },
+        in: Number,
+        out: Number,
+        closingQty: Number,
+        mainStoreQty: Number,
+        subStoreQty: Number,
+      },
+    ],
+  },
+  { timestamps: true }
+);
 
-itemSchema.pre("validate", async function(next) {
-  if (this.code || !this.category) return next();
-  const Category = mongoose.model("Category");
-  const cat = await Category.findById(this.category).lean();
-  if (!cat?.prefix) return next(new Error("Invalid category for code generation"));
+itemSchema.pre("validate", async function (next) {
+  try {
+    if (this.code) return next(); 
+    if (!this.category) return next(new Error("Category is required for code generation"));
 
-  const doc = await Counter.findOneAndUpdate(
-    { category: this.category },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true }
-  ).lean();
+    const cat = await Category.findById(this.category).lean();
+    if (!cat?.prefix) return next(new Error("Invalid category (prefix missing)"));
 
-  this.code = `${cat.prefix}/${String(doc.seq).padStart(4, "0")}`;
-  next();
+    const c = await Counter.findOneAndUpdate(
+      { category: cat._id },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    ).lean();
+
+    const seq = c.seq || 1;
+    this.code = `${cat.prefix}/${String(seq).padStart(4, "0")}`;
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = mongoose.model("Item", itemSchema);
