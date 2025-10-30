@@ -48,6 +48,8 @@ app.use('/api/stock', stockRoutes2);
 app.use('/api/bus-consumption', busConsumptionRoutes);
 app.use("/api/logs",logRoutes);
 app.use('/api/buses', busRoutes);
+app.use("/api/categories", require("./routes/categoryRoutes"));
+      
 
 app.get('/',(_req,res) => {
     res.json({status: 'ok', service: 'inventory-backend'});

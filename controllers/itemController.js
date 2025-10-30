@@ -4,44 +4,90 @@ const Vendor = require("../models/vendor");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const Bus = require("../models/Bus");
-
+const Category = require("../models/Category");      
 // ✅ Create Item
+
+async function resolveCategoryIdFromReq(req) {
+  const { category, categoryLabel, prefix, allowCreate } = req.body;
+
+  // If client already sends a Category _id, use it
+  if (category && mongoose.Types.ObjectId.isValid(category)) return category;
+
+  // Try by label/name if provided
+  if (categoryLabel && typeof categoryLabel === "string") {
+    const name = categoryLabel.trim().toLowerCase();
+    let cat = await Category.findOne({ name });
+    if (!cat && allowCreate) {
+      cat = await Category.create({
+        name,
+        label: categoryLabel.trim(),
+        prefix: (prefix || name.replace(/[^a-z]/g, "").slice(0, 3) || "CAT").toUpperCase(),
+      });
+    }
+    return cat?._id || null;
+  }
+
+  // Fallback: resolve by prefix
+  if (prefix && typeof prefix === "string") {
+    const cat = await Category.findOne({ prefix: prefix.trim().toUpperCase() });
+    return cat?._id || null;
+  }
+
+  return null;
+}
+
 exports.createItem = async (req, res) => {
   try {
     const {
-      category,
       headDescription,
       subDescription,
       unit,
       hsnCode,
-      gstRate,        
+      gstRate,
       remarks,
       vendor,
     } = req.body;
 
-    if (!headDescription)
+    if (!headDescription) {
       return res.status(400).json({ error: "headDescription is required" });
-    if (!category)
-      return res.status(400).json({ error: "category is required" });
+    }
 
-    const newItem = new Item({
-      category,
+    const categoryId = await resolveCategoryIdFromReq(req);
+    if (!categoryId) {
+      return res.status(400).json({
+        error: "Valid category is required (send 'category' as _id OR 'categoryLabel' (+ optional 'prefix') with 'allowCreate': true)"
+      });
+    }
+
+    // Basic gstRate validation
+    const parsedGst = Number.isFinite(Number(gstRate)) ? Number(gstRate) : 0;
+    if (parsedGst < 0 || parsedGst > 100) {
+      return res.status(400).json({ error: "gstRate must be between 0 and 100" });
+    }
+
+    const newItem = await Item.create({
+      category: categoryId,
       headDescription,
       subDescription,
       unit: unit || "pcs",
       hsnCode,
-      gstRate: Number(gstRate) || 0, 
+      gstRate: parsedGst,
       remarks,
       vendor,
     });
 
-    await newItem.save();
-    res.status(201).json(newItem);
+    const populated = await Item.findById(newItem._id)
+      .populate("category", "label prefix")
+      .populate("vendor", "name code gstNumber")
+      .lean();
+
+    res.status(201).json(populated);
   } catch (err) {
     console.error("Error creating item:", err);
     res.status(400).json({ error: err.message });
   }
 };
+
 
 // ✅ Get All Items with Latest Purchase Rate
 exports.getItems = async (req, res) => {
@@ -49,7 +95,9 @@ exports.getItems = async (req, res) => {
     const items = await Item.find(
       {},
       "code category headDescription subDescription unit hsnCode gstRate remarks vendor"
-    ).populate("vendor", "name code gstNumber");
+    )
+    .populate("category", "label prefix")
+    .populate("vendor", "name code gstNumber");
 
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
@@ -93,7 +141,7 @@ exports.deleteItem = async (req, res) => {
 exports.getItemOverview = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await Item.findById(id).populate("vendor");
+    const item = await Item.findById(id).populate("vendor").populate("category", "label prefix");
     if (!item) return res.status(404).json({ error: "Item not found" });
 
     const purchaseAgg = await PurchaseInvoice.aggregate([

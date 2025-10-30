@@ -1,53 +1,16 @@
-require("dotenv").config();
+require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 const mongoose = require("mongoose");
-const InventoryTransaction = require("../models/InventoryTransaction");
-const PurchaseInvoice = require("../models/purchaseInvoice");
-const IssueBill = require("../models/issueBill");
+const Item = require("../models/item");
+const Category = require("../models/Category");
 
-async function fixTransactions() {
+(async () => {
   await mongoose.connect(process.env.MONGO_URI);
-
-  console.log("🔄 Fixing Purchase Transactions...");
-  const purchases = await PurchaseInvoice.find().populate("items.item");
-  for (const inv of purchases) {
-    for (const it of inv.items) {
-      await InventoryTransaction.updateMany(
-        { "meta.invoice": inv._id, item: it.item._id, type: "PURCHASE" },
-        {
-          $set: {
-            rate: it.rate || 0,
-            amount: (it.subQuantity || 0) * (it.rate || 0),
-          },
-        }
-      );
-    }
-  }
-
-  console.log("🔄 Fixing Issue/Consumption/Sale Transactions...");
-  const issues = await IssueBill.find();
-  for (const bill of issues) {
-    for (const it of bill.items) {
-      let txnType = "ISSUE_TO_SUB";
-      if (bill.type === "SUB_TO_USER") txnType = "CONSUMPTION";
-      if (bill.type === "SUB_TO_SALE") txnType = "SALE";
-
-      await InventoryTransaction.updateMany(
-        { "meta.note": new RegExp(bill.department, "i"), item: it.item, type: txnType },
-        {
-          $set: {
-            rate: it.rate || 0,
-            amount: (it.quantity || 0) * (it.rate || 0),
-          },
-        }
-      );
-    }
-  }
-
-  console.log("✅ Backfill complete");
-  process.exit(0);
-}
-
-fixTransactions().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+  const cat = await Category.findOne({ prefix: "RM" }); 
+  const item = await Item.create({
+    category: cat._id,
+    headDescription: "Test Item For Code",
+    gstRate: 18,
+  });
+  console.log("Created:", item.code, item._id.toString());
+  await mongoose.disconnect();
+})();
