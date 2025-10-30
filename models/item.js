@@ -1,15 +1,20 @@
-// models/Item.js
 const mongoose = require("mongoose");
 const Counter = require("./Counter");
 const Category = require("./Category");
 
 const itemSchema = new mongoose.Schema({
   code: { type: String, unique: true },
-  category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Category",
+    required: true,
+  },
   headDescription: { type: String, required: true },
   subDescription: String,
   hsnCode: String,
   gstRate: { type: Number, default: 0 },
+  remarks: String,
+  unit: { type: String, default: "pcs" },
 }, { timestamps: true });
 
 async function generateUniqueCode(categoryId) {
@@ -20,7 +25,7 @@ async function generateUniqueCode(categoryId) {
   let code = "";
   let attempts = 0;
 
-  while (attempts < 10) { // 10 retries max
+  while (attempts < 10) {
     const counter = await Counter.findOneAndUpdate(
       { name: prefix },
       { $inc: { seq: 1 }, $setOnInsert: { name: prefix } },
@@ -29,7 +34,6 @@ async function generateUniqueCode(categoryId) {
 
     code = `${prefix}/${String(counter.seq).padStart(4, "0")}`;
 
-    // ✅ Check if this code already exists
     const exists = await mongoose.models.Item.exists({ code });
     if (!exists) return code;
 

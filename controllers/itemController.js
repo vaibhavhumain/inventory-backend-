@@ -45,7 +45,6 @@ exports.createItem = async (req, res) => {
       hsnCode,
       gstRate,
       remarks,
-      vendor,
     } = req.body;
 
     if (!headDescription) {
@@ -55,14 +54,16 @@ exports.createItem = async (req, res) => {
     const categoryId = await resolveCategoryIdFromReq(req);
     if (!categoryId) {
       return res.status(400).json({
-        error: "Valid category is required (send 'category' as _id OR 'categoryLabel' (+ optional 'prefix') with 'allowCreate': true)"
+        error:
+          "Valid category is required (send 'category' as _id OR 'categoryLabel' (+ optional 'prefix') with 'allowCreate': true)",
       });
     }
 
-    // Basic gstRate validation
     const parsedGst = Number.isFinite(Number(gstRate)) ? Number(gstRate) : 0;
     if (parsedGst < 0 || parsedGst > 100) {
-      return res.status(400).json({ error: "gstRate must be between 0 and 100" });
+      return res
+        .status(400)
+        .json({ error: "gstRate must be between 0 and 100" });
     }
 
     const newItem = await Item.create({
@@ -73,12 +74,11 @@ exports.createItem = async (req, res) => {
       hsnCode,
       gstRate: parsedGst,
       remarks,
-      vendor,
     });
 
+    // ✅ Only populate category, no vendor
     const populated = await Item.findById(newItem._id)
       .populate("category", "label prefix")
-      .populate( "name code gstNumber")
       .lean();
 
     res.status(201).json(populated);
