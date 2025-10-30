@@ -78,7 +78,7 @@ exports.createItem = async (req, res) => {
 
     const populated = await Item.findById(newItem._id)
       .populate("category", "label prefix")
-      .populate("vendor", "name code gstNumber")
+      .populate( "name code gstNumber")
       .lean();
 
     res.status(201).json(populated);
