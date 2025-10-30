@@ -32,24 +32,24 @@ const itemSchema = new mongoose.Schema(
 
 itemSchema.pre("validate", async function (next) {
   try {
-    if (this.code) return next(); 
+    if (this.code) return next();
     if (!this.category) return next(new Error("Category is required for code generation"));
 
     const cat = await Category.findById(this.category).lean();
     if (!cat?.prefix) return next(new Error("Invalid category (prefix missing)"));
 
     const c = await Counter.findOneAndUpdate(
-      { category: cat._id },
-      { $inc: { seq: 1 } },
+      { category: cat._id },                                   
+      { $inc: { seq: 1 }, $setOnInsert: { category: cat._id } }, 
       { new: true, upsert: true }
     ).lean();
 
-    const seq = c.seq || 1;
-    this.code = `${cat.prefix}/${String(seq).padStart(4, "0")}`;
+    this.code = `${cat.prefix}/${String(c.seq).padStart(4, "0")}`;
     next();
   } catch (err) {
     next(err);
   }
 });
+
 
 module.exports = mongoose.model("Item", itemSchema);
