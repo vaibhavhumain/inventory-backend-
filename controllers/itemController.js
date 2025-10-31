@@ -97,7 +97,6 @@ exports.getItems = async (req, res) => {
       "code category headDescription subDescription unit hsnCode gstRate remarks vendor"
     )
     .populate("category", "label prefix")
-    .populate("vendor", "name code gstNumber");
 
     const enrichedItems = await Promise.all(
       items.map(async (item) => {

@@ -9,6 +9,7 @@ const itemSchema = new mongoose.Schema({
     ref: "Category",
     required: true,
   },
+    
   headDescription: { type: String, required: true },
   subDescription: String,
   hsnCode: String,
