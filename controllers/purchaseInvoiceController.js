@@ -1,7 +1,33 @@
+const mongoose = require("mongoose");
+const Category = require("../models/Category");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const Item = require("../models/item");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const XLSX = require("xlsx");
+
+async function resolveCategoryId({ category, categoryLabel, prefix, allowCreate = true }) {
+  if (category && mongoose.Types.ObjectId.isValid(category)) return category;
+
+  if (categoryLabel && typeof categoryLabel === "string") {
+    const name = categoryLabel.trim().toLowerCase();
+    let cat = await Category.findOne({ name });
+    if (!cat && allowCreate) {
+      cat = await Category.create({
+        name,
+        label: categoryLabel.trim(),
+        prefix: (prefix || name.replace(/[^a-z]/g, "").slice(0, 3) || "CAT").toUpperCase(),
+      });
+    }
+    return cat?._id || null;
+  }
+
+  if (prefix && typeof prefix === "string") {
+    const cat = await Category.findOne({ prefix: prefix.trim().toUpperCase() });
+    return cat?._id || null;
+  }
+
+  return null;
+}
 
 const categoryPrefixes = {
   "raw material": "RM",
@@ -43,58 +69,35 @@ async function processItems(items) {
   const processedItems = [];
 
   for (const it of items) {
-    const headDescription = it.headDescription || it.item || it.overrideDescription;
+    const headDescription = (it.headDescription || it.overrideDescription || "").trim();
     if (!headDescription) throw new Error("Head Description is required");
 
-    const safeCategory = it.category?.toLowerCase().trim() || "raw material";
     const subQty = Number(it.subQuantity) || 0;
     const rate = Number(it.rate) || 0;
     const amount = subQty * rate;
     totalTaxableValue += amount;
 
-    let existingItem = await Item.findOne({ headDescription: headDescription.trim() });
+    // Resolve Category as ObjectId (matches Item schema)
+    const categoryId = await resolveCategoryId({
+      category: it.category,
+      categoryLabel: it.categoryLabel,
+      prefix: it.prefix,
+      allowCreate: true,
+    });
+    if (!categoryId) throw new Error("Valid category is required for item lines");
 
-    // 🟢 If item does not exist → create new
+    // Find/create Item WITHOUT touching stock/dailyStock
+    let existingItem = await Item.findOne({ headDescription, category: categoryId });
     if (!existingItem) {
-      const code = await generateItemCode(safeCategory);
       existingItem = new Item({
-        code,
-        category: safeCategory,
-        headDescription: headDescription.trim(),
+        // let Item pre-save hook generate 'code'
+        category: categoryId,
+        headDescription,
         subDescription: it.subDescription || "",
-        unit: it.subQuantityMeasurement,
+        unit: it.subQuantityMeasurement || "pcs",
         hsnCode: it.hsnCode || "",
         gstRate: Number(it.gstRate) || 0,
-        closingQty: subQty,
-        mainStoreQty: subQty,
         remarks: it.notes || null,
-        dailyStock: [
-          {
-            date: new Date(),
-            in: subQty,
-            out: 0,
-            closingQty: subQty,
-            mainStoreQty: subQty,
-            subStoreQty: 0,
-          },
-        ],
-      });
-      await existingItem.save();
-    } else {
-      // 🧮 Safe numeric conversions before math
-      const prevClosing = Number(existingItem.closingQty || 0);
-      const prevMain = Number(existingItem.mainStoreQty || 0);
-
-      existingItem.closingQty = prevClosing + subQty;
-      existingItem.mainStoreQty = prevMain + subQty;
-
-      existingItem.dailyStock.push({
-        date: new Date(),
-        in: subQty,
-        out: 0,
-        closingQty: existingItem.closingQty,
-        mainStoreQty: existingItem.mainStoreQty,
-        subStoreQty: Number(existingItem.subStoreQty || 0),
       });
       await existingItem.save();
     }
@@ -104,11 +107,11 @@ async function processItems(items) {
 
     processedItems.push({
       item: existingItem._id,
-      overrideDescription: it.overrideDescription || headDescription.trim(),
+      overrideDescription: it.overrideDescription || headDescription,
       headQuantity: Number(it.headQuantity) || 0,
-      headQuantityMeasurement: it.headQuantityMeasurement,
+      headQuantityMeasurement: it.headQuantityMeasurement || existingItem.unit || "pcs",
       subQuantity: subQty,
-      subQuantityMeasurement: it.subQuantityMeasurement,
+      subQuantityMeasurement: it.subQuantityMeasurement || existingItem.unit || "pcs",
       rate,
       amount,
       hsnSnapshot: existingItem.hsnCode || "",
@@ -119,6 +122,7 @@ async function processItems(items) {
 
   return { processedItems, totalTaxableValue, gstTotal };
 }
+
 
 // ✅ Create Purchase Invoice
 exports.createPurchaseInvoice = async (req, res) => {
