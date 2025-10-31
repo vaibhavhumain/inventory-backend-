@@ -8,6 +8,15 @@ const XLSX = require("xlsx");
 async function resolveCategoryId({ category, categoryLabel, prefix, allowCreate = true }) {
   if (category && mongoose.Types.ObjectId.isValid(category)) return category;
 
+  if (category && typeof category === "string") {
+    const q = category.trim();
+    let cat =
+      (await Category.findOne({ prefix: q.toUpperCase() })) ||
+      (await Category.findOne({ name: q.toLowerCase() })) ||
+      (await Category.findOne({ label: q }));
+    if (cat) return cat._id;
+  }
+
   if (categoryLabel && typeof categoryLabel === "string") {
     const name = categoryLabel.trim().toLowerCase();
     let cat = await Category.findOne({ name });
@@ -18,15 +27,19 @@ async function resolveCategoryId({ category, categoryLabel, prefix, allowCreate 
         prefix: (prefix || name.replace(/[^a-z]/g, "").slice(0, 3) || "CAT").toUpperCase(),
       });
     }
-    return cat?._id || null;
+    if (cat) return cat._id;
   }
 
   if (prefix && typeof prefix === "string") {
     const cat = await Category.findOne({ prefix: prefix.trim().toUpperCase() });
-    return cat?._id || null;
+    if (cat) return cat._id;
   }
 
-  return null;
+  let def = await Category.findOne({ name: "raw material" });
+  if (!def) {
+    def = await Category.create({ name: "raw material", label: "Raw Material", prefix: "RM" });
+  }
+  return def._id;
 }
 
 const categoryPrefixes = {
@@ -143,6 +156,9 @@ exports.createPurchaseInvoice = async (req, res) => {
       otherChargesAfterTax,
     } = req.body;
 
+    const parsed = date ? new Date(date) : null;
+    const txDate = parsed && !isNaN(parsed.getTime()) ? parsed : new Date();
+
     if (!invoiceNumber || !partyName || !vendor || !items?.length) {
       return res.status(400).json({
         error: "Invoice number, vendor, party name and items are required",
@@ -193,7 +209,7 @@ exports.createPurchaseInvoice = async (req, res) => {
             quantity: Number(it.subQuantity) || 0,
             rate: Number(it.rate) || 0,
             amount: lineAmount,
-            date: new Date(date) || new Date(),
+            date: txDate ,
             meta: { invoice: newInvoice._id },
           },
         ],
@@ -257,15 +273,7 @@ exports.updatePurchaseInvoice = async (req, res) => {
       ...rest
     } = req.body;
 
-    // 🧹 Reverse previous stock effect
-    for (const old of invoice.items) {
-      const itemDoc = await Item.findById(old.item).session(session);
-      if (itemDoc) {
-        itemDoc.closingQty = Number(itemDoc.closingQty || 0) - Number(old.subQuantity || 0);
-        itemDoc.mainStoreQty = Number(itemDoc.mainStoreQty || 0) - Number(old.subQuantity || 0);
-        await itemDoc.save({ session });
-      }
-    }
+   
 
     // 🧮 Reprocess new items
     const { processedItems, totalTaxableValue, gstTotal } = await processItems(items);
