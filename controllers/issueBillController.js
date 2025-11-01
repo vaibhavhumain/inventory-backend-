@@ -20,7 +20,8 @@ exports.createIssueBill = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (!["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE"].includes(type)) {
+    // ✅ allow MAIN_TO_USER
+    if (!["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE", "MAIN_TO_USER"].includes(type)) {
       return res.status(400).json({ error: "Invalid issue type" });
     }
 
@@ -36,6 +37,7 @@ exports.createIssueBill = async (req, res) => {
         return res.status(400).json({ error: `Item ${it.item} not found` });
       }
 
+      // ✅ stock movement for MAIN_TO_USER
       if (type === "MAIN_TO_SUB") {
         if (dbItem.mainStoreQty < it.quantity) {
           return res.status(400).json({
@@ -44,6 +46,7 @@ exports.createIssueBill = async (req, res) => {
         }
         dbItem.mainStoreQty -= it.quantity;
         dbItem.subStoreQty += it.quantity;
+
       } else if (["SUB_TO_USER", "SUB_TO_SALE"].includes(type)) {
         if (dbItem.subStoreQty < it.quantity) {
           return res.status(400).json({
@@ -51,11 +54,20 @@ exports.createIssueBill = async (req, res) => {
           });
         }
         dbItem.subStoreQty -= it.quantity;
+
+      } else if (type === "MAIN_TO_USER") {
+        if (dbItem.mainStoreQty < it.quantity) {
+          return res.status(400).json({
+            error: `Not enough stock in Main Store for ${dbItem.headDescription}`,
+          });
+        }
+        dbItem.mainStoreQty -= it.quantity;
       }
 
       dbItem.closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
 
-      dbItem.dailyStock.push({
+      // ✅ defensive push
+      (dbItem.dailyStock ??= []).push({
         date: issueDate || new Date(),
         in: 0,
         out: it.quantity,
@@ -66,9 +78,11 @@ exports.createIssueBill = async (req, res) => {
 
       await dbItem.save();
 
+      // ✅ txn type & meta.source for MAIN_TO_USER
       let txnType = "ISSUE_TO_SUB";
       if (type === "SUB_TO_USER") txnType = "CONSUMPTION";
       if (type === "SUB_TO_SALE") txnType = "SALE";
+      if (type === "MAIN_TO_USER") txnType = "CONSUMPTION";
 
       const lineAmount = (it.rate || 0) * (it.quantity || 0);
       totalAmount += lineAmount;
@@ -82,6 +96,9 @@ exports.createIssueBill = async (req, res) => {
         date: issueDate || new Date(),
         meta: {
           note: `Issued by ${userName} to ${issuedTo || department}`,
+          source:
+            type === "MAIN_TO_USER" ? "MAIN" :
+            (type === "SUB_TO_USER" || type === "SUB_TO_SALE" ? "SUB" : "MAIN→SUB"),
           customer: type === "SUB_TO_SALE" ? issuedTo : undefined,
         },
       });
@@ -104,9 +121,9 @@ exports.createIssueBill = async (req, res) => {
       issueDate,
       department,
       type,
-      issuedTo: ["SUB_TO_USER", "SUB_TO_SALE"].includes(type)
+      issuedTo: ["SUB_TO_USER", "SUB_TO_SALE", "MAIN_TO_USER"].includes(type)
         ? issuedTo
-        : undefined,
+        : undefined, // ✅ require issuedTo for MAIN_TO_USER too (schema validator already handles)
       items: processedItems,
       totalAmount,
       voucherNumber: finalVoucherNumber,
@@ -119,7 +136,8 @@ exports.createIssueBill = async (req, res) => {
 
     await newBill.save();
 
-    if (type === "SUB_TO_USER" && bus?.busCode) {
+    // ✅ link bus for SUB_TO_USER and MAIN_TO_USER (optional, if bus details provided)
+    if ((type === "SUB_TO_USER" || type === "MAIN_TO_USER") && bus?.busCode) {
       let existingBus = await Bus.findOne({ busCode: bus.busCode });
 
       if (existingBus) {
@@ -128,6 +146,7 @@ exports.createIssueBill = async (req, res) => {
         existingBus.engineNo = bus.engineNo || existingBus.engineNo;
         existingBus.model = bus.model || existingBus.model;
 
+        existingBus.issueBills ??= [];
         if (!existingBus.issueBills.includes(newBill._id)) {
           existingBus.issueBills.push(newBill._id);
         }
@@ -218,9 +237,10 @@ exports.createMultiIssueBill = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
-    if (type !== "SUB_TO_USER") {
+    // ✅ allow MAIN_TO_USER here too (optional; remove if you want only SUB_TO_USER)
+    if (!["SUB_TO_USER", "MAIN_TO_USER"].includes(type)) {
       return res.status(400).json({
-        error: "This endpoint is only for SUB_TO_USER issue type.",
+        error: "This endpoint is only for SUB_TO_USER or MAIN_TO_USER issue types.",
       });
     }
 
@@ -245,20 +265,30 @@ exports.createMultiIssueBill = async (req, res) => {
       let totalAmount = 0;
       const processedItems = [];
 
-      // 🔹 Process each item for that bus
+      // Process each item for that bus
       for (const it of busItems) {
         const dbItem = await Item.findById(it.item);
         if (!dbItem) continue;
 
-        // Reduce sub store qty
-        if (dbItem.subStoreQty < it.quantity) {
-          return res.status(400).json({
-            error: `Not enough stock in Sub Store for ${dbItem.headDescription}`,
-          });
+        if (type === "SUB_TO_USER") {
+          if (dbItem.subStoreQty < it.quantity) {
+            return res.status(400).json({
+              error: `Not enough stock in Sub Store for ${dbItem.headDescription}`,
+            });
+          }
+          dbItem.subStoreQty -= it.quantity;
+
+        } else if (type === "MAIN_TO_USER") {
+          if (dbItem.mainStoreQty < it.quantity) {
+            return res.status(400).json({
+              error: `Not enough stock in Main Store for ${dbItem.headDescription}`,
+            });
+          }
+          dbItem.mainStoreQty -= it.quantity;
         }
-        dbItem.subStoreQty -= it.quantity;
+
         dbItem.closingQty = dbItem.mainStoreQty + dbItem.subStoreQty;
-        dbItem.dailyStock.push({
+        (dbItem.dailyStock ??= []).push({
           date: issueDate || new Date(),
           in: 0,
           out: it.quantity,
@@ -273,14 +303,15 @@ exports.createMultiIssueBill = async (req, res) => {
 
         await InventoryTransaction.create({
           item: dbItem._id,
-          type: "CONSUMPTION",
+          type: "CONSUMPTION", // both MAIN_TO_USER and SUB_TO_USER are consumption
           quantity: it.quantity,
           rate: it.rate || 0,
           amount,
           date: issueDate || new Date(),
           meta: {
             note: `Issued by ${userName} to ${issuedTo}`,
-            bus : bus._id,
+            source: type === "MAIN_TO_USER" ? "MAIN" : "SUB", // ✅
+            bus: bus._id,
           },
         });
 
@@ -292,7 +323,7 @@ exports.createMultiIssueBill = async (req, res) => {
         });
       }
 
-      // 🔹 Create IssueBill for each bus
+      // Create IssueBill for each bus
       const count = await IssueBill.countDocuments();
       const finalVoucherNumber =
         voucherNumber || `ISS-${String(count + 1).padStart(4, "0")}`;
@@ -312,7 +343,8 @@ exports.createMultiIssueBill = async (req, res) => {
 
       await issueBill.save();
 
-      // 🔹 Link to bus
+      // Link to bus
+      bus.issueBills ??= [];
       if (!bus.issueBills.includes(issueBill._id)) {
         bus.issueBills.push(issueBill._id);
         await bus.save();

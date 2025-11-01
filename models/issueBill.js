@@ -24,7 +24,7 @@ const issueBillSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE"],
+      enum: ["MAIN_TO_SUB", "SUB_TO_USER", "SUB_TO_SALE", "MAIN_TO_USER"],
       required: true,
     },
 
@@ -32,7 +32,7 @@ const issueBillSchema = new mongoose.Schema(
       type: String,
       validate: {
         validator: function (v) {
-          if (["SUB_TO_USER", "SUB_TO_SALE"].includes(this.type)) {
+          if (["SUB_TO_USER", "MAIN_TO_USER", "SUB_TO_SALE"].includes(this.type)) {
             return v && v.trim().length > 0;
           }
           return true;
