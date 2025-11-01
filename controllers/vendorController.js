@@ -1,6 +1,4 @@
 const Vendor = require('../models/vendor');
-
-// Create Vendor
 exports.createVendor = async (req, res) => {
   try {
     const { name, address, state, gstNumber } = req.body;
@@ -29,7 +27,6 @@ exports.createVendor = async (req, res) => {
   }
 };
 
-// Get all vendors
 exports.getVendors = async (req, res) => {
   try {
     const vendors = await Vendor.find().sort({ name: 1 });
@@ -39,8 +36,6 @@ exports.getVendors = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-// Get vendor by ID
 exports.getVendorById = async (req, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
@@ -51,8 +46,6 @@ exports.getVendorById = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-// Update vendor (❌ no code update)
 exports.updateVendor = async (req, res) => {
   try {
     const { name, address, state, gstNumber } = req.body;
@@ -70,8 +63,6 @@ exports.updateVendor = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-// Delete vendor
 exports.deleteVendor = async (req, res) => {
   try {
     const vendor = await Vendor.findByIdAndDelete(req.params.id);

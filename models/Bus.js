@@ -26,25 +26,14 @@ const busSchema = new mongoose.Schema(
 
     model: {
       type: String,
-      enum: [
-        "SP", 
-        "HY", 
-        "TO", 
-        "KA", 
-        "AR", 
-        "SE", 
-        "SL", 
-        "SS", 
-      ],
+      enum: ["SP", "HY", "TO", "KA", "AR", "SE", "SL", "SS"],
       required: true,
     },
 
-    issueBills: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "IssueBill",
-      },
-    ],
+    issueBills: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "IssueBill" }],
+      default: [],
+    },
   },
   { timestamps: true }
 );

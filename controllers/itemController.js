@@ -140,7 +140,7 @@ exports.deleteItem = async (req, res) => {
 exports.getItemOverview = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await Item.findById(id).populate("vendor").populate("category", "label prefix");
+    const item = await Item.findById(id).populate("category", "label prefix");
     if (!item) return res.status(404).json({ error: "Item not found" });
 
     const purchaseAgg = await PurchaseInvoice.aggregate([
