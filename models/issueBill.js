@@ -6,6 +6,8 @@ const billItemSchema = new mongoose.Schema(
     quantity: { type: Number, required: true },
     rate: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
+    bus: { type: mongoose.Schema.Types.ObjectId, ref: "Bus", default: null }, 
+    otherReason: { type: String, trim: true },
   },
   { _id: false }
 );

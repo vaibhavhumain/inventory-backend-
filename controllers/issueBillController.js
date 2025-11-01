@@ -100,6 +100,8 @@ exports.createIssueBill = async (req, res) => {
             type === "MAIN_TO_USER" ? "MAIN" :
             (type === "SUB_TO_USER" || type === "SUB_TO_SALE" ? "SUB" : "MAIN→SUB"),
           customer: type === "SUB_TO_SALE" ? issuedTo : undefined,
+          bus: it.bus || undefined,
+          otherReason: it.otherReason || undefined,
         },
       });
 
@@ -108,6 +110,8 @@ exports.createIssueBill = async (req, res) => {
         quantity: it.quantity,
         rate: it.rate || 0,
         amount: lineAmount,
+        bus: it.bus || undefined,
+        otherReason: it.otherReason || undefined,
       });
     }
 
